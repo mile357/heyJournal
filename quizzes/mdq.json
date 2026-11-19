@@ -1,0 +1,65 @@
+{
+  "id": "mdq",
+  "name": "MDQ",
+  "fullName": "Mood Disorder Questionnaire",
+  "category": "Mood & Depression",
+  "shortDescription": "13-item bipolar spectrum symptom checklist plus co-occurrence and impact context.",
+  "timeframe": "Has there ever been a period of time when you were not your usual self and...",
+  "estimatedMinutes": 3,
+  "resourceUrl": "https://www.ohsu.edu/sites/default/files/2019-06/cms-quality-bipolar_disorder_mdq_screener.pdf",
+  "resourceLabel": "MDQ Clinical Screener",
+  "citation": "Hirschfeld RM, Williams JB, Spitzer RL, et al. Am J Psychiatry. 2000;157(11):1873-1875.",
+  "answerScale": [
+    { "label": "No", "value": 0 },
+    { "label": "Yes", "value": 1 }
+  ],
+  "questions": [
+    { "id": "q1", "text": "You felt so good or so hyper that other people thought you were not your normal self, or you were so hyper that you got into trouble?" },
+    { "id": "q2", "text": "You were so irritable that you shouted at people or started fights or arguments?" },
+    { "id": "q3", "text": "You felt much more self-confident than usual?" },
+    { "id": "q4", "text": "You got much less sleep than usual and found you didn't really miss it?" },
+    { "id": "q5", "text": "You were much more talkative or spoke faster than usual?" },
+    { "id": "q6", "text": "Thoughts raced through your head or you couldn't slow your mind down?" },
+    { "id": "q7", "text": "You were so easily distracted by things around you that you had trouble concentrating or staying on track?" },
+    { "id": "q8", "text": "You had much more energy than usual?" },
+    { "id": "q9", "text": "You were much more active or did many more things than usual?" },
+    { "id": "q10", "text": "You were much more social or outgoing than usual (for example, telephoning friends in the middle of the night)?" },
+    { "id": "q11", "text": "You were much more interested in sex than usual?" },
+    { "id": "q12", "text": "You did things that were unusual for you or that other people might have thought were excessive, foolish, or risky?" },
+    { "id": "q13", "text": "Spending money got you or your family into trouble?" },
+    {
+      "id": "q14",
+      "excludeFromTotal": true,
+      "text": "If you checked YES to more than one of the above, have several of these ever happened during the same period of time?",
+      "options": [
+        { "label": "No", "value": 0 },
+        { "label": "Yes", "value": 1 }
+      ]
+    },
+    {
+      "id": "q15",
+      "excludeFromTotal": true,
+      "text": "How much of a problem did any of these cause you (unable to work, family/money/legal troubles, or arguments)?",
+      "options": [
+        { "label": "No problem", "value": 0 },
+        { "label": "Minor problem", "value": 1 },
+        { "label": "Moderate problem", "value": 2 },
+        { "label": "Serious problem", "value": 3 }
+      ]
+    }
+  ],
+  "scoring": {
+    "method": "sum",
+    "min": 0,
+    "max": 13,
+    "unit": "yes",
+    "higherIsWorse": true,
+    "formulaDescription": "Count of 'Yes' responses across the 13 core mood-elevation symptoms (range 0–13). Standard positive clinical screen requires ≥7 core symptoms, co-occurrence (Q14 = Yes), and moderate/serious impact (Q15 ≥ 2).",
+    "severityBands": [
+      { "min": 0, "max": 3, "label": "Low Symptom Count", "level": "low" },
+      { "min": 4, "max": 6, "label": "Below Screen Threshold", "level": "mild" },
+      { "min": 7, "max": 10, "label": "Elevated (≥7 Threshold)", "level": "moderate" },
+      { "min": 11, "max": 13, "label": "High Symptom Count", "level": "severe" }
+    ]
+  }
+}

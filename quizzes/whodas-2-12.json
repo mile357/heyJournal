@@ -1,0 +1,56 @@
+{
+  "id": "whodas-2-12",
+  "name": "WHODAS 2.0",
+  "fullName": "WHO Disability Assessment Schedule 2.0 (12-Item)",
+  "category": "Functioning & Disability",
+  "shortDescription": "WHO 12-item assessment of day-to-day health, mobility, self-care, cognition, and participation.",
+  "timeframe": "In the past 30 days, how much difficulty did you have in:",
+  "estimatedMinutes": 3,
+  "resourceUrl": "https://www.who.int/standards/classifications/international-classification-of-functioning-disability-and-health/who-disability-assessment-schedule",
+  "resourceLabel": "WHO WHODAS 2.0",
+  "citation": "Üstün TB, Kostanjsek N, Chatterji S, Rehm J. World Health Organization, 2010.",
+  "answerScale": [
+    { "label": "None", "value": 0 },
+    { "label": "Mild", "value": 1 },
+    { "label": "Moderate", "value": 2 },
+    { "label": "Severe", "value": 3 },
+    { "label": "Extreme or cannot do", "value": 4 }
+  ],
+  "questions": [
+    { "id": "s1", "subscale": "mobility", "text": "Standing for long periods such as 30 minutes?" },
+    { "id": "s2", "subscale": "life-activities", "text": "Taking care of your household responsibilities?" },
+    { "id": "s3", "subscale": "cognition", "text": "Learning a new task, for example, learning how to get to a new place?" },
+    { "id": "s4", "subscale": "participation", "text": "How much of a problem did you have joining in community activities (for example, festivities, religious or other activities) in the same way as anyone else can?" },
+    { "id": "s5", "subscale": "participation", "text": "How much have you been emotionally affected by your health problems?" },
+    { "id": "s6", "subscale": "cognition", "text": "Concentrating on doing something for ten minutes?" },
+    { "id": "s7", "subscale": "mobility", "text": "Walking a long distance such as a kilometre (or equivalent)?" },
+    { "id": "s8", "subscale": "self-care", "text": "Washing your whole body?" },
+    { "id": "s9", "subscale": "self-care", "text": "Getting dressed?" },
+    { "id": "s10", "subscale": "getting-along", "text": "Dealing with people you do not know?" },
+    { "id": "s11", "subscale": "getting-along", "text": "Maintaining a friendship?" },
+    { "id": "s12", "subscale": "life-activities", "text": "Your day-to-day work or school?" }
+  ],
+  "scoring": {
+    "method": "percentage",
+    "min": 0,
+    "max": 100,
+    "unit": "%",
+    "higherIsWorse": true,
+    "formulaDescription": "Simple WHO scoring: sum of 12 items (0–4 each, max 48) converted to a 0–100% disability index ((sum / 48) × 100). Lower percentages indicate higher daily functioning.",
+    "severityBands": [
+      { "min": 0, "max": 4, "label": "None", "level": "low" },
+      { "min": 5, "max": 24, "label": "Mild", "level": "mild" },
+      { "min": 25, "max": 49, "label": "Moderate", "level": "moderate" },
+      { "min": 50, "max": 95, "label": "Severe", "level": "high" },
+      { "min": 96, "max": 100, "label": "Extreme", "level": "severe" }
+    ],
+    "subscales": [
+      { "id": "cognition", "name": "Cognition", "min": 0, "max": 8 },
+      { "id": "mobility", "name": "Mobility", "min": 0, "max": 8 },
+      { "id": "self-care", "name": "Self-Care", "min": 0, "max": 8 },
+      { "id": "getting-along", "name": "Getting Along", "min": 0, "max": 8 },
+      { "id": "life-activities", "name": "Life Activities", "min": 0, "max": 8 },
+      { "id": "participation", "name": "Participation", "min": 0, "max": 8 }
+    ]
+  }
+}

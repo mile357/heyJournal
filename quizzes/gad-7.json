@@ -1,0 +1,41 @@
+{
+  "id": "gad-7",
+  "name": "GAD-7",
+  "fullName": "Generalized Anxiety Disorder-7",
+  "category": "Anxiety & Stress",
+  "shortDescription": "7-item clinical screening and longitudinal tracking tool for generalized anxiety symptoms.",
+  "timeframe": "Over the last 2 weeks, how often have you been bothered by the following problems?",
+  "estimatedMinutes": 2,
+  "resourceUrl": "https://adaa.org/sites/default/files/GAD-7_Anxiety-updated_0.pdf",
+  "resourceLabel": "ADAA GAD-7 Reference",
+  "citation": "Spitzer RL, Kroenke K, Williams JB, Löwe B. Arch Intern Med. 2006;166(10):1092-1097.",
+  "answerScale": [
+    { "label": "Not at all", "value": 0 },
+    { "label": "Several days", "value": 1 },
+    { "label": "More than half the days", "value": 2 },
+    { "label": "Nearly every day", "value": 3 }
+  ],
+  "questions": [
+    { "id": "q1", "text": "Feeling nervous, anxious, or on edge" },
+    { "id": "q2", "text": "Not being able to stop or control worrying" },
+    { "id": "q3", "text": "Worrying too much about different things" },
+    { "id": "q4", "text": "Trouble relaxing" },
+    { "id": "q5", "text": "Being so restless that it is hard to sit still" },
+    { "id": "q6", "text": "Becoming easily annoyed or irritable" },
+    { "id": "q7", "text": "Feeling afraid, as if something awful might happen" }
+  ],
+  "scoring": {
+    "method": "sum",
+    "min": 0,
+    "max": 21,
+    "unit": "pts",
+    "higherIsWorse": true,
+    "formulaDescription": "Sum of all 7 items scored 0–3 each (range 0–21). Cutoffs at 5, 10, and 15 represent mild, moderate, and severe anxiety.",
+    "severityBands": [
+      { "min": 0, "max": 4, "label": "Minimal", "level": "low" },
+      { "min": 5, "max": 9, "label": "Mild", "level": "mild" },
+      { "min": 10, "max": 14, "label": "Moderate", "level": "moderate" },
+      { "min": 15, "max": 21, "label": "Severe", "level": "severe" }
+    ]
+  }
+}

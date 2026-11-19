@@ -1,0 +1,21 @@
+services:
+  heyjournal:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: heyjournal:latest
+    container_name: heyjournal
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      # Persists zero-knowledge encrypted SQLite DB (journal.db) and nightly 3 AM backups (data/backups/)
+      - ./data:/app/data
+      # Optional: mount a custom quizzes folder on the host to drop in new JSON quizzes without rebuilding
+      # - ./quizzes:/app/quizzes:ro
+    environment:
+      - PORT=8080
+      - TZ=America/Los_Angeles
+      # - ALLOW_SIGNUPS=1          # Set to 0 to disable new registrations (can also be toggled in Admin UI)
+      # - BACKUP_RETENTION_DAYS=14 # Number of nightly encrypted SQLite backups to keep
+      # - SESSION_TTL_DAYS=14      # Cookie session lifetime in days

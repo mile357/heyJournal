@@ -1,0 +1,101 @@
+{
+  "id": "dass-21",
+  "name": "DASS-21",
+  "fullName": "Depression Anxiety Stress Scales-21",
+  "category": "Anxiety & Stress",
+  "shortDescription": "21-item tri-dimensional self-report scale tracking Depression, Anxiety, and Stress separately.",
+  "timeframe": "Please read each statement and indicate how much the statement applied to you over the past week:",
+  "estimatedMinutes": 4,
+  "resourceUrl": "https://www2.psy.unsw.edu.au/dass/",
+  "resourceLabel": "UNSW DASS Reference",
+  "citation": "Lovibond SH, Lovibond PF. Psychology Foundation of Australia, 1995.",
+  "answerScale": [
+    { "label": "Did not apply to me at all", "value": 0 },
+    { "label": "Applied to me to some degree, or some of the time", "value": 1 },
+    { "label": "Applied to me to a considerable degree, or a good part of time", "value": 2 },
+    { "label": "Applied to me very much, or most of the time", "value": 3 }
+  ],
+  "questions": [
+    { "id": "q1", "subscale": "stress", "text": "I found it hard to wind down" },
+    { "id": "q2", "subscale": "anxiety", "text": "I was aware of dryness of my mouth" },
+    { "id": "q3", "subscale": "depression", "text": "I couldn't seem to experience any positive feeling at all" },
+    { "id": "q4", "subscale": "anxiety", "text": "I experienced breathing difficulty (e.g., excessively rapid breathing, breathlessness in the absence of physical exertion)" },
+    { "id": "q5", "subscale": "depression", "text": "I found it difficult to work up the initiative to do things" },
+    { "id": "q6", "subscale": "stress", "text": "I tended to over-react to situations" },
+    { "id": "q7", "subscale": "anxiety", "text": "I experienced trembling (e.g., in the hands)" },
+    { "id": "q8", "subscale": "stress", "text": "I felt that I was using a lot of nervous energy" },
+    { "id": "q9", "subscale": "anxiety", "text": "I was worried about situations in which I might panic and make a fool of myself" },
+    { "id": "q10", "subscale": "depression", "text": "I felt that I had nothing to look forward to" },
+    { "id": "q11", "subscale": "stress", "text": "I found myself getting agitated" },
+    { "id": "q12", "subscale": "stress", "text": "I found it difficult to relax" },
+    { "id": "q13", "subscale": "depression", "text": "I felt down-hearted and blue" },
+    { "id": "q14", "subscale": "stress", "text": "I was intolerant of anything that kept me from getting on with what I was doing" },
+    { "id": "q15", "subscale": "anxiety", "text": "I felt I was close to panic" },
+    { "id": "q16", "subscale": "depression", "text": "I was unable to become enthusiastic about anything" },
+    { "id": "q17", "subscale": "depression", "text": "I felt I wasn't worth much as a person" },
+    { "id": "q18", "subscale": "stress", "text": "I felt that I was rather touchy" },
+    { "id": "q19", "subscale": "anxiety", "text": "I was aware of the action of my heart in the absence of physical exertion (e.g., sense of heart rate increase, heart missing a beat)" },
+    { "id": "q20", "subscale": "anxiety", "text": "I felt scared without any good reason" },
+    { "id": "q21", "subscale": "depression", "text": "I felt that life was meaningless" }
+  ],
+  "scoring": {
+    "method": "sum",
+    "multiplier": 2,
+    "min": 0,
+    "max": 126,
+    "unit": "pts",
+    "higherIsWorse": true,
+    "formulaDescription": "Each 7-item subscale (Depression, Anxiety, Stress) is summed and multiplied by 2 to match full DASS-42 norms (0–42 per subscale; 0–126 total distress).",
+    "severityBands": [
+      { "min": 0, "max": 30, "label": "Normal", "level": "low" },
+      { "min": 31, "max": 48, "label": "Mild", "level": "mild" },
+      { "min": 49, "max": 68, "label": "Moderate", "level": "moderate" },
+      { "min": 69, "max": 88, "label": "Severe", "level": "high" },
+      { "min": 89, "max": 126, "label": "Extremely Severe", "level": "severe" }
+    ],
+    "subscales": [
+      {
+        "id": "depression",
+        "name": "Depression",
+        "multiplier": 2,
+        "min": 0,
+        "max": 42,
+        "severityBands": [
+          { "min": 0, "max": 9, "label": "Normal", "level": "low" },
+          { "min": 10, "max": 13, "label": "Mild", "level": "mild" },
+          { "min": 14, "max": 20, "label": "Moderate", "level": "moderate" },
+          { "min": 21, "max": 27, "label": "Severe", "level": "high" },
+          { "min": 28, "max": 42, "label": "Extremely Severe", "level": "severe" }
+        ]
+      },
+      {
+        "id": "anxiety",
+        "name": "Anxiety",
+        "multiplier": 2,
+        "min": 0,
+        "max": 42,
+        "severityBands": [
+          { "min": 0, "max": 7, "label": "Normal", "level": "low" },
+          { "min": 8, "max": 9, "label": "Mild", "level": "mild" },
+          { "min": 10, "max": 14, "label": "Moderate", "level": "moderate" },
+          { "min": 15, "max": 19, "label": "Severe", "level": "high" },
+          { "min": 20, "max": 42, "label": "Extremely Severe", "level": "severe" }
+        ]
+      },
+      {
+        "id": "stress",
+        "name": "Stress",
+        "multiplier": 2,
+        "min": 0,
+        "max": 42,
+        "severityBands": [
+          { "min": 0, "max": 14, "label": "Normal", "level": "low" },
+          { "min": 15, "max": 18, "label": "Mild", "level": "mild" },
+          { "min": 19, "max": 25, "label": "Moderate", "level": "moderate" },
+          { "min": 26, "max": 33, "label": "Severe", "level": "high" },
+          { "min": 34, "max": 42, "label": "Extremely Severe", "level": "severe" }
+        ]
+      }
+    ]
+  }
+}

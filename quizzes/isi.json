@@ -1,0 +1,82 @@
+{
+  "id": "isi",
+  "name": "ISI",
+  "fullName": "Insomnia Severity Index",
+  "category": "Sleep",
+  "shortDescription": "7-item validated clinical assessment of nighttime and daytime insomnia severity.",
+  "timeframe": "Rate the current (last 2 weeks) severity of your sleep problems:",
+  "estimatedMinutes": 2,
+  "resourceUrl": "https://www.ons.org/sites/default/files/InsomniaSeverityIndex_ISI.pdf",
+  "resourceLabel": "ISI Clinical Reference",
+  "citation": "Bastien CH, Vallières A, Morin CM. Sleep Med. 2001;2(4):297-307.",
+  "answerScale": [
+    { "label": "None", "value": 0 },
+    { "label": "Mild", "value": 1 },
+    { "label": "Moderate", "value": 2 },
+    { "label": "Severe", "value": 3 },
+    { "label": "Very severe", "value": 4 }
+  ],
+  "questions": [
+    { "id": "q1", "text": "Difficulty falling asleep" },
+    { "id": "q2", "text": "Difficulty staying asleep" },
+    { "id": "q3", "text": "Problems waking up too early" },
+    {
+      "id": "q4",
+      "text": "How satisfied/dissatisfied are you with your current sleep pattern?",
+      "options": [
+        { "label": "Very satisfied", "value": 0 },
+        { "label": "Satisfied", "value": 1 },
+        { "label": "Moderately satisfied", "value": 2 },
+        { "label": "Dissatisfied", "value": 3 },
+        { "label": "Very dissatisfied", "value": 4 }
+      ]
+    },
+    {
+      "id": "q5",
+      "text": "How noticeable to others do you think your sleep problem is in terms of impairing the quality of your life?",
+      "options": [
+        { "label": "Not at all noticeable", "value": 0 },
+        { "label": "A little", "value": 1 },
+        { "label": "Somewhat", "value": 2 },
+        { "label": "Much", "value": 3 },
+        { "label": "Very much noticeable", "value": 4 }
+      ]
+    },
+    {
+      "id": "q6",
+      "text": "How worried/distressed are you about your current sleep problem?",
+      "options": [
+        { "label": "Not at all worried", "value": 0 },
+        { "label": "A little", "value": 1 },
+        { "label": "Somewhat", "value": 2 },
+        { "label": "Much", "value": 3 },
+        { "label": "Very much worried", "value": 4 }
+      ]
+    },
+    {
+      "id": "q7",
+      "text": "To what extent do you consider your sleep problem to interfere with your daily functioning (e.g., daytime fatigue, mood, ability to function at work/daily chores, concentration, memory)?",
+      "options": [
+        { "label": "Not at all interfering", "value": 0 },
+        { "label": "A little", "value": 1 },
+        { "label": "Somewhat", "value": 2 },
+        { "label": "Much", "value": 3 },
+        { "label": "Very much interfering", "value": 4 }
+      ]
+    }
+  ],
+  "scoring": {
+    "method": "sum",
+    "min": 0,
+    "max": 28,
+    "unit": "pts",
+    "higherIsWorse": true,
+    "formulaDescription": "Sum of all 7 items scored 0–4 each (range 0–28). Scores of 8, 15, and 22 mark subthreshold, moderate, and severe clinical insomnia.",
+    "severityBands": [
+      { "min": 0, "max": 7, "label": "No Clinically Significant Insomnia", "level": "low" },
+      { "min": 8, "max": 14, "label": "Subthreshold Insomnia", "level": "mild" },
+      { "min": 15, "max": 21, "label": "Moderate Clinical Insomnia", "level": "moderate" },
+      { "min": 22, "max": 28, "label": "Severe Clinical Insomnia", "level": "severe" }
+    ]
+  }
+}

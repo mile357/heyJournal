@@ -1,0 +1,62 @@
+{
+  "id": "pcl-5",
+  "name": "PCL-5",
+  "fullName": "PTSD Checklist for DSM-5",
+  "category": "Trauma & Focus",
+  "shortDescription": "20-item VA National Center for PTSD self-report scale tracking DSM-5 trauma symptoms.",
+  "timeframe": "In the past month, how much were you bothered by:",
+  "estimatedMinutes": 5,
+  "resourceUrl": "https://www.ptsd.va.gov/professional/assessment/adult-sr/ptsd-checklist.asp",
+  "resourceLabel": "VA National Center for PTSD",
+  "citation": "Weathers FW, Litz BT, Keane TM, Palmieri PA, Marx BP, Schnurr PP. National Center for PTSD, 2013.",
+  "answerScale": [
+    { "label": "Not at all", "value": 0 },
+    { "label": "A little bit", "value": 1 },
+    { "label": "Moderately", "value": 2 },
+    { "label": "Quite a bit", "value": 3 },
+    { "label": "Extremely", "value": 4 }
+  ],
+  "questions": [
+    { "id": "q1", "subscale": "intrusion", "text": "Repeated, disturbing, and unwanted memories of the stressful experience?" },
+    { "id": "q2", "subscale": "intrusion", "text": "Repeated, disturbing dreams of the stressful experience?" },
+    { "id": "q3", "subscale": "intrusion", "text": "Suddenly feeling or acting as if the stressful experience were actually happening again (as if you were actually back there reliving it)?" },
+    { "id": "q4", "subscale": "intrusion", "text": "Feeling very upset when something reminded you of the stressful experience?" },
+    { "id": "q5", "subscale": "intrusion", "text": "Having strong physical reactions when something reminded you of the stressful experience (for example, heart pounding, trouble breathing, sweating)?" },
+    { "id": "q6", "subscale": "avoidance", "text": "Avoiding memories, thoughts, or feelings related to the stressful experience?" },
+    { "id": "q7", "subscale": "avoidance", "text": "Avoiding external reminders of the stressful experience (for example, people, places, conversations, activities, objects, or situations)?" },
+    { "id": "q8", "subscale": "cognition-mood", "text": "Trouble remembering important parts of the stressful experience?" },
+    { "id": "q9", "subscale": "cognition-mood", "text": "Having strong negative beliefs about yourself, other people, or the world (for example, having thoughts such as: I am bad, there is something seriously wrong with me, no one can be trusted, the world is completely dangerous)?" },
+    { "id": "q10", "subscale": "cognition-mood", "text": "Blaming yourself or someone else for the stressful experience or what happened after it?" },
+    { "id": "q11", "subscale": "cognition-mood", "text": "Having strong negative feelings such as fear, horror, anger, guilt, or shame?" },
+    { "id": "q12", "subscale": "cognition-mood", "text": "Loss of interest in activities that you used to enjoy?" },
+    { "id": "q13", "subscale": "cognition-mood", "text": "Feeling distant or cut off from other people?" },
+    { "id": "q14", "subscale": "cognition-mood", "text": "Trouble experiencing positive feelings (for example, being unable to feel happiness or have loving feelings for people close to you)?" },
+    { "id": "q15", "subscale": "arousal", "text": "Irritable behavior, angry outbursts, or acting aggressively?" },
+    { "id": "q16", "subscale": "arousal", "text": "Taking too many risks or doing things that could cause you harm?" },
+    { "id": "q17", "subscale": "arousal", "text": "Being \"superalert\" or watchful or on guard?" },
+    { "id": "q18", "subscale": "arousal", "text": "Feeling jumpy or easily startled?" },
+    { "id": "q19", "subscale": "arousal", "text": "Having difficulty concentrating?" },
+    { "id": "q20", "subscale": "arousal", "text": "Trouble falling or staying asleep?" }
+  ],
+  "scoring": {
+    "method": "sum",
+    "min": 0,
+    "max": 80,
+    "unit": "pts",
+    "higherIsWorse": true,
+    "formulaDescription": "Sum of all 20 items scored 0–4 each (range 0–80). A score of 31–33 or higher is a widely used cutoff indicating probable PTSD; a 5–10 point change is typically reliable clinically.",
+    "severityBands": [
+      { "min": 0, "max": 15, "label": "Minimal", "level": "low" },
+      { "min": 16, "max": 30, "label": "Subthreshold", "level": "mild" },
+      { "min": 31, "max": 45, "label": "Moderate (Clinical Cutoff)", "level": "moderate" },
+      { "min": 46, "max": 60, "label": "High", "level": "high" },
+      { "min": 61, "max": 80, "label": "Severe", "level": "severe" }
+    ],
+    "subscales": [
+      { "id": "intrusion", "name": "Cluster B: Intrusion", "min": 0, "max": 20 },
+      { "id": "avoidance", "name": "Cluster C: Avoidance", "min": 0, "max": 8 },
+      { "id": "cognition-mood", "name": "Cluster D: Cognition & Mood", "min": 0, "max": 28 },
+      { "id": "arousal", "name": "Cluster E: Arousal & Reactivity", "min": 0, "max": 24 }
+    ]
+  }
+}

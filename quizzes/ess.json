@@ -1,0 +1,43 @@
+{
+  "id": "ess",
+  "name": "ESS",
+  "fullName": "Epworth Sleepiness Scale",
+  "category": "Sleep",
+  "shortDescription": "8-item standard measure of general daytime sleepiness across everyday situations.",
+  "timeframe": "In recent times, how likely are you to doze off or fall asleep in the following situations (not just feeling tired)?",
+  "estimatedMinutes": 2,
+  "resourceUrl": "https://epworthsleepinessscale.com/about-the-ess/",
+  "resourceLabel": "Epworth Sleepiness Scale",
+  "citation": "Johns MW. Sleep. 1991;14(6):540-545.",
+  "answerScale": [
+    { "label": "Would never doze", "value": 0 },
+    { "label": "Slight chance of dozing", "value": 1 },
+    { "label": "Moderate chance of dozing", "value": 2 },
+    { "label": "High chance of dozing", "value": 3 }
+  ],
+  "questions": [
+    { "id": "q1", "text": "Sitting and reading" },
+    { "id": "q2", "text": "Watching TV" },
+    { "id": "q3", "text": "Sitting, inactive, in a public place (e.g., a theater or a meeting)" },
+    { "id": "q4", "text": "As a passenger in a car for an hour without a break" },
+    { "id": "q5", "text": "Lying down to rest in the afternoon when circumstances permit" },
+    { "id": "q6", "text": "Sitting and talking to someone" },
+    { "id": "q7", "text": "Sitting quietly after a lunch without alcohol" },
+    { "id": "q8", "text": "In a car, while stopped for a few minutes in traffic" }
+  ],
+  "scoring": {
+    "method": "sum",
+    "min": 0,
+    "max": 24,
+    "unit": "pts",
+    "higherIsWorse": true,
+    "formulaDescription": "Sum of all 8 situational items scored 0–3 each (range 0–24). Scores above 10 indicate excessive daytime sleepiness.",
+    "severityBands": [
+      { "min": 0, "max": 5, "label": "Lower Normal", "level": "low" },
+      { "min": 6, "max": 10, "label": "Higher Normal", "level": "mild" },
+      { "min": 11, "max": 12, "label": "Mild Excessive Sleepiness", "level": "moderate" },
+      { "min": 13, "max": 15, "label": "Moderate Excessive Sleepiness", "level": "high" },
+      { "min": 16, "max": 24, "label": "Severe Excessive Sleepiness", "level": "severe" }
+    ]
+  }
+}

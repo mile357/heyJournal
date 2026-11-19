@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark" data-theme-id="metro">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#000000" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="heyjournal" />
+  <title>heyjournal</title>
+  <link rel="manifest" href="/manifest.json?v=1" />
+  <link rel="icon" type="image/svg+xml" href="/icon.svg?v=1" />
+  <link rel="stylesheet" href="/styles.css?v=1" />
+  <script src="/theme-boot.js?v=1"></script>
+</head>
+<body>
+  <!-- TOP HEADER -->
+  <header class="panorama-header">
+    <div class="panorama-brand">
+      <h1 class="panorama-title" id="appTitle">heyjournal</h1>
+      <span class="panorama-subtitle" id="headerSubtitle">encrypted journal</span>
+    </div>
+
+    <div class="panorama-status">
+      <span class="user-pill hidden" id="headerUserPill"></span>
+      <div class="header-actions">
+        <button class="slot-icon-btn hidden" id="btnLockVault" type="button" title="Lock Journal" aria-label="Lock Journal">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" aria-hidden="true">
+            <rect x="4" y="11" width="16" height="10"></rect>
+            <path d="M8 11V7a4 4 0 0 1 8 0v4"></path>
+          </svg>
+        </button>
+        <button class="metro-ellipsis-btn global-ellipsis" id="btnSettings" type="button" title="Settings & Themes" aria-label="Settings & Themes">
+          <svg class="ellipsis-dots-svg" viewBox="0 0 18 4" aria-hidden="true">
+            <circle cx="2" cy="2" r="1.75" fill="currentColor" />
+            <circle cx="9" cy="2" r="1.75" fill="currentColor" />
+            <circle cx="16" cy="2" r="1.75" fill="currentColor" />
+          </svg>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- ZERO-KNOWLEDGE AUTH / UNLOCK GATE -->
+  <section class="auth-screen" id="authScreen">
+    <div class="metro-slot auth-card" id="authCard">
+      <!-- Rendered dynamically by app.js -->
+    </div>
+  </section>
+
+  <!-- MAIN AUTHENTICATED APP SHELL -->
+  <div id="appShell" class="hidden">
+    <nav class="pivot-nav" id="primaryPivotNav" aria-label="Journal Sections">
+      <button class="pivot-tab active" data-tab="input" type="button">input</button>
+      <button class="pivot-tab" data-tab="metrics" type="button">metrics</button>
+      <button class="pivot-tab" data-tab="review" type="button">review</button>
+      <button class="pivot-tab" data-tab="report" type="button">report</button>
+    </nav>
+
+    <main class="journal-main" id="mainStage">
+      <!-- Active tab rendered dynamically -->
+    </main>
+  </div>
+
+  <!-- GUIDED QUIZ RUNNER / BREAKDOWN MODAL -->
+  <div class="modal-backdrop" id="modalBackdrop" role="dialog" aria-modal="true">
+    <div class="modal-panel" id="modalPanel"></div>
+  </div>
+
+  <!-- SETTINGS & APPEARANCE FLYOUT DRAWER -->
+  <div class="flyout-backdrop" id="flyoutBackdrop">
+    <aside class="metro-flyout" id="flyoutPanel" aria-label="Settings"></aside>
+  </div>
+
+  <!-- METRO NOTIFICATION TOAST -->
+  <div class="toast-banner" id="toastBanner" role="status" aria-live="polite"></div>
+
+  <script type="module" src="/app.js?v=1"></script>
+</body>
+</html>

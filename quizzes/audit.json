@@ -1,0 +1,90 @@
+{
+  "id": "audit",
+  "name": "AUDIT",
+  "fullName": "Alcohol Use Disorders Identification Test",
+  "category": "Substance & Habits",
+  "shortDescription": "10-item WHO screening tool for tracking alcohol consumption patterns and risk over time.",
+  "timeframe": "Think about your alcohol use during the past year (one standard drink ≈ 12 oz beer, 5 oz wine, or 1.5 oz spirits):",
+  "estimatedMinutes": 2,
+  "resourceUrl": "https://www.who.int/publications/i/item/WHO-MSD-MSB-01.6a",
+  "resourceLabel": "WHO AUDIT Manual",
+  "citation": "Babor TF, Higgins-Biddle JC, Saunders JB, Monteiro MG. World Health Organization, 2001.",
+  "answerScale": [
+    { "label": "Never", "value": 0 },
+    { "label": "Less than monthly", "value": 1 },
+    { "label": "Monthly", "value": 2 },
+    { "label": "Weekly", "value": 3 },
+    { "label": "Daily or almost daily", "value": 4 }
+  ],
+  "questions": [
+    {
+      "id": "q1",
+      "subscale": "consumption",
+      "text": "How often do you have a drink containing alcohol?",
+      "options": [
+        { "label": "Never", "value": 0 },
+        { "label": "Monthly or less", "value": 1 },
+        { "label": "2–4 times a month", "value": 2 },
+        { "label": "2–3 times a week", "value": 3 },
+        { "label": "4 or more times a week", "value": 4 }
+      ]
+    },
+    {
+      "id": "q2",
+      "subscale": "consumption",
+      "text": "How many standard drinks containing alcohol do you have on a typical day when you are drinking?",
+      "options": [
+        { "label": "1 or 2", "value": 0 },
+        { "label": "3 or 4", "value": 1 },
+        { "label": "5 or 6", "value": 2 },
+        { "label": "7 to 9", "value": 3 },
+        { "label": "10 or more", "value": 4 }
+      ]
+    },
+    { "id": "q3", "subscale": "consumption", "text": "How often do you have six or more drinks on one occasion?" },
+    { "id": "q4", "subscale": "dependence", "text": "How often during the last year have you found that you were not able to stop drinking once you had started?" },
+    { "id": "q5", "subscale": "dependence", "text": "How often during the last year have you failed to do what was normally expected of you because of drinking?" },
+    { "id": "q6", "subscale": "dependence", "text": "How often during the last year have you needed a first drink in the morning to get yourself going after a heavy drinking session?" },
+    { "id": "q7", "subscale": "harm", "text": "How often during the last year have you had a feeling of guilt or remorse after drinking?" },
+    { "id": "q8", "subscale": "harm", "text": "How often during the last year have you been unable to remember what happened the night before because of your drinking?" },
+    {
+      "id": "q9",
+      "subscale": "harm",
+      "text": "Have you or someone else been injured because of your drinking?",
+      "options": [
+        { "label": "No", "value": 0 },
+        { "label": "Yes, but not in the last year", "value": 2 },
+        { "label": "Yes, during the last year", "value": 4 }
+      ]
+    },
+    {
+      "id": "q10",
+      "subscale": "harm",
+      "text": "Has a relative, friend, doctor, or other healthcare worker been concerned about your drinking or suggested you cut down?",
+      "options": [
+        { "label": "No", "value": 0 },
+        { "label": "Yes, but not in the last year", "value": 2 },
+        { "label": "Yes, during the last year", "value": 4 }
+      ]
+    }
+  ],
+  "scoring": {
+    "method": "sum",
+    "min": 0,
+    "max": 40,
+    "unit": "pts",
+    "higherIsWorse": true,
+    "formulaDescription": "Sum of all 10 items (Q1–Q8 scored 0–4; Q9–Q10 scored 0, 2, or 4; range 0–40). WHO risk zones start at 8, 16, and 20.",
+    "severityBands": [
+      { "min": 0, "max": 7, "label": "Low Risk", "level": "low" },
+      { "min": 8, "max": 15, "label": "Hazardous / Increasing Risk", "level": "moderate" },
+      { "min": 16, "max": 19, "label": "Harmful / Higher Risk", "level": "high" },
+      { "min": 20, "max": 40, "label": "Possible Dependence", "level": "severe" }
+    ],
+    "subscales": [
+      { "id": "consumption", "name": "AUDIT-C (Consumption)", "min": 0, "max": 12 },
+      { "id": "dependence", "name": "Dependence Symptoms", "min": 0, "max": 12 },
+      { "id": "harm", "name": "Alcohol-Related Harm", "min": 0, "max": 16 }
+    ]
+  }
+}

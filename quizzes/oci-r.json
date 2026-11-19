@@ -1,0 +1,62 @@
+{
+  "id": "oci-r",
+  "name": "OCI-R",
+  "fullName": "Obsessive-Compulsive Inventory–Revised",
+  "category": "OCD & Compulsions",
+  "shortDescription": "18-item self-report scale measuring distress across six OCD symptom dimensions.",
+  "timeframe": "The following statements refer to experiences that many people have in their everyday lives. Rate how much each experience has distressed or bothered you during the past month.",
+  "estimatedMinutes": 4,
+  "resourceUrl": "https://www.apa.org/pi/about/publications/caregivers/practice-settings/assessment/tools/oci-r",
+  "resourceLabel": "OCI-R Overview",
+  "citation": "Foa EB, Huppert JD, Leiberg S, et al. Psychol Assess. 2002;14(4):485-496.",
+  "answerScale": [
+    { "label": "Not at all", "value": 0 },
+    { "label": "A little", "value": 1 },
+    { "label": "Moderately", "value": 2 },
+    { "label": "A lot", "value": 3 },
+    { "label": "Extremely", "value": 4 }
+  ],
+  "questions": [
+    { "id": "q1", "subscale": "hoarding", "text": "I have saved up so many things that they get in the way." },
+    { "id": "q2", "subscale": "checking", "text": "I check things more often than necessary." },
+    { "id": "q3", "subscale": "ordering", "text": "I get upset if objects are not arranged properly." },
+    { "id": "q4", "subscale": "neutralizing", "text": "I feel compelled to count while I am doing things." },
+    { "id": "q5", "subscale": "washing", "text": "I find it difficult to touch an object when I know it has been touched by strangers or certain people." },
+    { "id": "q6", "subscale": "obsessing", "text": "I find it difficult to control my own thoughts." },
+    { "id": "q7", "subscale": "hoarding", "text": "I collect things I don't need." },
+    { "id": "q8", "subscale": "checking", "text": "I repeatedly check doors, windows, drawers, etc." },
+    { "id": "q9", "subscale": "ordering", "text": "I get upset if others change the way I have arranged things." },
+    { "id": "q10", "subscale": "neutralizing", "text": "I feel I have to repeat certain numbers." },
+    { "id": "q11", "subscale": "washing", "text": "I sometimes have to wash or clean myself simply because I feel contaminated." },
+    { "id": "q12", "subscale": "obsessing", "text": "I am upset by unpleasant thoughts that come into my mind against my will." },
+    { "id": "q13", "subscale": "hoarding", "text": "I avoid throwing things away because I am afraid I might need them later." },
+    { "id": "q14", "subscale": "checking", "text": "I repeatedly check gas and water taps and light switches after turning them off." },
+    { "id": "q15", "subscale": "ordering", "text": "I need things to be arranged in a particular way." },
+    { "id": "q16", "subscale": "neutralizing", "text": "I feel that there are good and bad numbers." },
+    { "id": "q17", "subscale": "washing", "text": "I wash my hands more often and longer than necessary." },
+    { "id": "q18", "subscale": "obsessing", "text": "I frequently get nasty thoughts and have difficulty in getting rid of them." }
+  ],
+  "scoring": {
+    "method": "sum",
+    "min": 0,
+    "max": 72,
+    "unit": "pts",
+    "higherIsWorse": true,
+    "formulaDescription": "Sum of all 18 items scored 0–4 each (range 0–72), plus six 3-item subscales (0–12 each). A total score of 21 or higher is the standard clinical screening threshold for likely OCD.",
+    "severityBands": [
+      { "min": 0, "max": 15, "label": "Minimal", "level": "low" },
+      { "min": 16, "max": 20, "label": "Subthreshold", "level": "mild" },
+      { "min": 21, "max": 35, "label": "Moderate (Clinical Range)", "level": "moderate" },
+      { "min": 36, "max": 50, "label": "High", "level": "high" },
+      { "min": 51, "max": 72, "label": "Severe", "level": "severe" }
+    ],
+    "subscales": [
+      { "id": "washing", "name": "Washing", "min": 0, "max": 12 },
+      { "id": "obsessing", "name": "Obsessing", "min": 0, "max": 12 },
+      { "id": "hoarding", "name": "Hoarding", "min": 0, "max": 12 },
+      { "id": "ordering", "name": "Ordering", "min": 0, "max": 12 },
+      { "id": "checking", "name": "Checking", "min": 0, "max": 12 },
+      { "id": "neutralizing", "name": "Neutralizing", "min": 0, "max": 12 }
+    ]
+  }
+}

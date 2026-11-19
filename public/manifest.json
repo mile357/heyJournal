@@ -1,0 +1,17 @@
+{
+  "name": "HeyJournal",
+  "short_name": "heyjournal",
+  "description": "Zero-knowledge encrypted personal journal & clinical metric tracker.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#000000",
+  "theme_color": "#000000",
+  "icons": [
+    {
+      "src": "/icon.svg?v=1",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

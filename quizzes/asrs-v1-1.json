@@ -1,0 +1,59 @@
+{
+  "id": "asrs-v1-1",
+  "name": "ASRS-v1.1",
+  "fullName": "Adult ADHD Self-Report Scale (v1.1)",
+  "category": "Trauma & Focus",
+  "shortDescription": "18-item WHO scale assessing adult inattention, executive functioning, and hyperactivity.",
+  "timeframe": "Over the past 6 months, how often have you felt or conducted yourself in the following ways?",
+  "estimatedMinutes": 4,
+  "resourceUrl": "https://www.hcp.med.harvard.edu/ncs/asrs.php",
+  "resourceLabel": "Harvard / WHO ASRS",
+  "citation": "Kessler RC, Adler L, Ames M, et al. Psychol Med. 2005;35(2):245-256.",
+  "answerScale": [
+    { "label": "Never", "value": 0 },
+    { "label": "Rarely", "value": 1 },
+    { "label": "Sometimes", "value": 2 },
+    { "label": "Often", "value": 3 },
+    { "label": "Very Often", "value": 4 }
+  ],
+  "questions": [
+    { "id": "q1", "subscale": "inattentive", "text": "How often do you have trouble wrapping up the final details of a project, once the challenging parts have been done?" },
+    { "id": "q2", "subscale": "inattentive", "text": "How often do you have difficulty getting things in order when you have to do a task that requires organization?" },
+    { "id": "q3", "subscale": "inattentive", "text": "How often do you have problems remembering appointments or obligations?" },
+    { "id": "q4", "subscale": "inattentive", "text": "When you have a task that requires a lot of thought, how often do you avoid or delay getting started?" },
+    { "id": "q5", "subscale": "hyperactive", "text": "How often do you fidget or squirm with your hands or feet when you have to sit down for a long time?" },
+    { "id": "q6", "subscale": "hyperactive", "text": "How often do you feel overly active and compelled to do things, like you were driven by a motor?" },
+    { "id": "q7", "subscale": "inattentive", "text": "How often do you make careless mistakes when you have to work on a boring or difficult project?" },
+    { "id": "q8", "subscale": "inattentive", "text": "How often do you have difficulty keeping your attention when you are doing boring or repetitive work?" },
+    { "id": "q9", "subscale": "inattentive", "text": "How often do you have difficulty concentrating on what people say to you, even when they are speaking to you directly?" },
+    { "id": "q10", "subscale": "inattentive", "text": "How often do you misplace or have difficulty finding things at home or at work?" },
+    { "id": "q11", "subscale": "inattentive", "text": "How often are you distracted by activity or noise around you?" },
+    { "id": "q12", "subscale": "hyperactive", "text": "How often do you leave your seat in meetings or other situations in which you are expected to remain seated?" },
+    { "id": "q13", "subscale": "hyperactive", "text": "How often do you feel restless or fidgety?" },
+    { "id": "q14", "subscale": "hyperactive", "text": "How often do you have difficulty unwinding and relaxing when you have time to yourself?" },
+    { "id": "q15", "subscale": "hyperactive", "text": "How often do you find yourself talking too much when you are in social situations?" },
+    { "id": "q16", "subscale": "hyperactive", "text": "When you're in a conversation, how often do you find yourself finishing the sentences of the people you are talking to, before they can finish them themselves?" },
+    { "id": "q17", "subscale": "hyperactive", "text": "How often do you have difficulty waiting your turn in situations when turn taking is required?" },
+    { "id": "q18", "subscale": "hyperactive", "text": "How often do you interrupt others when they are busy?" }
+  ],
+  "scoring": {
+    "method": "sum",
+    "min": 0,
+    "max": 72,
+    "unit": "pts",
+    "higherIsWorse": true,
+    "formulaDescription": "Sum of all 18 items scored 0–4 each (range 0–72), with Inattentive (0–36), Hyperactive-Impulsive (0–36), and Part A Screener (Q1–Q6, 0–24) subscales.",
+    "severityBands": [
+      { "min": 0, "max": 23, "label": "Low Symptom Load", "level": "low" },
+      { "min": 24, "max": 35, "label": "Mild / Borderline", "level": "mild" },
+      { "min": 36, "max": 47, "label": "Moderate", "level": "moderate" },
+      { "min": 48, "max": 59, "label": "High", "level": "high" },
+      { "min": 60, "max": 72, "label": "Very High", "level": "severe" }
+    ],
+    "subscales": [
+      { "id": "part-a", "name": "Part A Screener (Q1–Q6)", "questionIds": ["q1", "q2", "q3", "q4", "q5", "q6"], "min": 0, "max": 24 },
+      { "id": "inattentive", "name": "Inattentive", "min": 0, "max": 36 },
+      { "id": "hyperactive", "name": "Hyperactive-Impulsive", "min": 0, "max": 36 }
+    ]
+  }
+}

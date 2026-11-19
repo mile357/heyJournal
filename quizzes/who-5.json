@@ -1,0 +1,42 @@
+{
+  "id": "who-5",
+  "name": "WHO-5",
+  "fullName": "WHO-5 Well-Being Index",
+  "category": "Mood & Depression",
+  "shortDescription": "5-item World Health Organization measure of positive mental well-being (higher is better).",
+  "timeframe": "Over the last two weeks, how often have you felt the following:",
+  "estimatedMinutes": 1,
+  "resourceUrl": "https://www.who.int/publications/m/item/WHO-UCN-MSD-MHE-2024.01",
+  "resourceLabel": "WHO-5 Reference",
+  "citation": "Topp CW, Østergaard SD, Søndergaard S, Bech P. Psychother Psychosom. 2015;84(3):167-176.",
+  "answerScale": [
+    { "label": "At no time", "value": 0 },
+    { "label": "Some of the time", "value": 1 },
+    { "label": "Less than half the time", "value": 2 },
+    { "label": "More than half the time", "value": 3 },
+    { "label": "Most of the time", "value": 4 },
+    { "label": "All of the time", "value": 5 }
+  ],
+  "questions": [
+    { "id": "q1", "text": "I have felt cheerful and in good spirits" },
+    { "id": "q2", "text": "I have felt calm and relaxed" },
+    { "id": "q3", "text": "I have felt active and vigorous" },
+    { "id": "q4", "text": "I woke up feeling fresh and rested" },
+    { "id": "q5", "text": "My daily life has been filled with things that interest me" }
+  ],
+  "scoring": {
+    "method": "sum",
+    "multiplier": 4,
+    "min": 0,
+    "max": 100,
+    "unit": "%",
+    "higherIsWorse": false,
+    "formulaDescription": "Raw sum of 5 items (0–25) multiplied by 4 to yield a 0–100% positive well-being index. Scores of 50% or lower suggest poor well-being and warrant follow-up.",
+    "severityBands": [
+      { "min": 0, "max": 28, "label": "Very Low Well-Being", "level": "severe" },
+      { "min": 29, "max": 50, "label": "Reduced Well-Being", "level": "moderate" },
+      { "min": 51, "max": 72, "label": "Good Well-Being", "level": "mild" },
+      { "min": 73, "max": 100, "label": "High Well-Being", "level": "low" }
+    ]
+  }
+}
