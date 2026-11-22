@@ -14,7 +14,8 @@ export function findSeverityBand(score, bands) {
   if (!Array.isArray(bands) || bands.length === 0 || typeof score !== "number" || Number.isNaN(score)) {
     return null;
   }
-  for (const band of bands) {
+  const sorted = [...bands].sort((a, b) => (a.min ?? -Infinity) - (b.min ?? -Infinity));
+  for (const band of sorted) {
     const min = typeof band.min === "number" ? band.min : -Infinity;
     const max = typeof band.max === "number" ? band.max : Infinity;
     if (score >= min && score <= max) {
@@ -26,22 +27,23 @@ export function findSeverityBand(score, bands) {
       };
     }
   }
-  // Boundary fallback: clamp to first or last band
-  const sorted = [...bands].sort((a, b) => (a.min ?? 0) - (b.min ?? 0));
-  if (score < (sorted[0].min ?? 0)) {
-    return {
-      label: String(sorted[0].label || ""),
-      level: String(sorted[0].level || "low"),
-      min: sorted[0].min,
-      max: sorted[0].max,
-    };
+  // Boundary or fractional-gap fallback: pick closest band instead of jumping to severe
+  let best = sorted[0];
+  let bestDist = Infinity;
+  for (const band of sorted) {
+    const min = typeof band.min === "number" ? band.min : -Infinity;
+    const max = typeof band.max === "number" ? band.max : Infinity;
+    const dist = score < min ? min - score : score > max ? score - max : 0;
+    if (dist < bestDist) {
+      bestDist = dist;
+      best = band;
+    }
   }
-  const last = sorted[sorted.length - 1];
   return {
-    label: String(last.label || ""),
-    level: String(last.level || "severe"),
-    min: last.min,
-    max: last.max,
+    label: String(best.label || ""),
+    level: String(best.level || "low"),
+    min: best.min,
+    max: best.max,
   };
 }
 

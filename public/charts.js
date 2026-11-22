@@ -4,7 +4,7 @@
  * so charts automatically harmonize across all 20 themes (dark & light modes).
  */
 
-import { findSeverityBand } from "./quiz-engine.js?v=2";
+import { findSeverityBand } from "./quiz-engine.js?v=4";
 
 const RANGE_DAYS_MAP = {
   "30d": 30,
@@ -208,7 +208,7 @@ export function renderMetricChart(containerEl, options) {
     `;
   }
 
-  // X-axis date ticks (up to 4 evenly spaced labels)
+  // X-axis date ticks (up to 4 evenly spaced non-overlapping labels)
   const xTickIndices = new Set([0, points.length - 1]);
   if (points.length >= 4) {
     xTickIndices.add(Math.floor(points.length / 3));
@@ -216,14 +216,24 @@ export function renderMetricChart(containerEl, options) {
   } else if (points.length === 3) {
     xTickIndices.add(1);
   }
+  const sameDaySpan = xSpan > 0 && xSpan < 24 * 60 * 60 * 1000;
+  const formatXTick = (tsMs) => {
+    if (!sameDaySpan) return formatShortDate(tsMs);
+    return new Date(tsMs).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  };
+  let lastTickX = -Infinity;
   const xTicksSvg = Array.from(xTickIndices)
     .sort((a, b) => a - b)
-    .map((idx) => {
+    .map((idx, pos, arr) => {
       const pt = points[idx];
       const x = mapX(pt.tsMs, idx);
+      const isLast = pos === arr.length - 1;
+      if (!isLast && x - lastTickX < 52) return "";
+      if (isLast && pos > 0 && x - lastTickX < 44) return "";
+      lastTickX = x;
       const anchor = idx === 0 ? "start" : idx === points.length - 1 ? "end" : "middle";
       return `<text x="${x.toFixed(1)}" y="${height - 8}" text-anchor="${anchor}" class="chart-axis-label">${escapeXml(
-        formatShortDate(pt.tsMs)
+        formatXTick(pt.tsMs)
       )}</text>`;
     })
     .join("");

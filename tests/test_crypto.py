@@ -215,6 +215,21 @@ class TestZeroKnowledgeCryptoEngine(unittest.TestCase):
         self.assertTrue(out["roundTripOk"])
         self.assertTrue(out["crossAadRejected"])
 
+    def test_async_pure_js_pbkdf2_matches_sync_pure_js(self):
+        js = """
+        import { _pureJs } from "./public/crypto.js";
+        const toBytes = (s) => new Uint8Array(Array.from(s).map((c) => c.charCodeAt(0)));
+        const toHex = (a) => Array.from(a).map((b) => b.toString(16).padStart(2, "0")).join("");
+        const pw = toBytes("lan-http-passphrase");
+        const salt = toBytes("0123456789abcdef");
+        const syncHex = toHex(_pureJs.pbkdf2Sha256Pure(pw, salt, 26000, 64));
+        const asyncHex = toHex(await _pureJs.pbkdf2Sha256PureAsync(pw, salt, 26000, 64));
+        const out = JSON.stringify({ syncHex, asyncHex });
+        if (typeof print === "function") print(out); else console.log(out);
+        """
+        out = json.loads(run_es_module_snippet(js))
+        self.assertEqual(out["syncHex"], out["asyncHex"])
+
 
 if __name__ == "__main__":
     unittest.main()

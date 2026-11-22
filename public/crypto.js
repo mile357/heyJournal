@@ -322,24 +322,90 @@ function pbkdf2Sha256Pure(passwordBytes, saltBytes, iterations, dkLen) {
   const workState = new Uint32Array(8);
   const scratch64 = new Uint8Array(64);
 
-  for (let b = 1; b <= blockCount; b++) {
-    saltPlusIndex[saltBytes.length] = (b >>> 24) & 0xff;
-    saltPlusIndex[saltBytes.length + 1] = (b >>> 16) & 0xff;
-    saltPlusIndex[saltBytes.length + 2] = (b >>> 8) & 0xff;
-    saltPlusIndex[saltBytes.length + 3] = b & 0xff;
+  try {
+    for (let b = 1; b <= blockCount; b++) {
+      saltPlusIndex[saltBytes.length] = (b >>> 24) & 0xff;
+      saltPlusIndex[saltBytes.length + 1] = (b >>> 16) & 0xff;
+      saltPlusIndex[saltBytes.length + 2] = (b >>> 8) & 0xff;
+      saltPlusIndex[saltBytes.length + 3] = b & 0xff;
 
-    const u = hmacSha256Fast(ctx, saltPlusIndex);
-    const t = new Uint8Array(u);
+      const u = hmacSha256Fast(ctx, saltPlusIndex);
+      const t = new Uint8Array(u);
 
-    for (let iter = 1; iter < iterations; iter++) {
-      hmacSha256Block32(ctx, u, workState, scratch64);
-      for (let j = 0; j < 32; j++) {
-        t[j] ^= u[j];
+      for (let iter = 1; iter < iterations; iter++) {
+        hmacSha256Block32(ctx, u, workState, scratch64);
+        for (let j = 0; j < 32; j++) {
+          t[j] ^= u[j];
+        }
       }
+      out.set(t, (b - 1) * 32);
+      u.fill(0);
+      t.fill(0);
     }
-    out.set(t, (b - 1) * 32);
+    return out.subarray(0, dkLen);
+  } finally {
+    _shaW.fill(0);
+    workState.fill(0);
+    scratch64.fill(0);
+    saltPlusIndex.fill(0);
+    ctx.innerInit.fill(0);
+    ctx.outerInit.fill(0);
   }
-  return out.subarray(0, dkLen);
+}
+
+function yieldMacrotask() {
+  return new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+async function pbkdf2Sha256PureAsync(passwordBytes, saltBytes, iterations, dkLen) {
+  if (!Number.isInteger(iterations) || iterations < 1) {
+    throw new Error("PBKDF2 iterations must be a positive integer");
+  }
+  // Yield once before heavy work so UI busy states ("unlocking...") paint immediately
+  await yieldMacrotask();
+
+  const ctx = makeHmacSha256Context(passwordBytes);
+  const blockCount = Math.ceil(dkLen / 32);
+  const out = new Uint8Array(blockCount * 32);
+  const saltPlusIndex = new Uint8Array(saltBytes.length + 4);
+  saltPlusIndex.set(saltBytes, 0);
+
+  const workState = new Uint32Array(8);
+  const scratch64 = new Uint8Array(64);
+  const CHUNK_ITERS = 25000;
+
+  try {
+    for (let b = 1; b <= blockCount; b++) {
+      saltPlusIndex[saltBytes.length] = (b >>> 24) & 0xff;
+      saltPlusIndex[saltBytes.length + 1] = (b >>> 16) & 0xff;
+      saltPlusIndex[saltBytes.length + 2] = (b >>> 8) & 0xff;
+      saltPlusIndex[saltBytes.length + 3] = b & 0xff;
+
+      const u = hmacSha256Fast(ctx, saltPlusIndex);
+      const t = new Uint8Array(u);
+
+      for (let iter = 1; iter < iterations; iter++) {
+        hmacSha256Block32(ctx, u, workState, scratch64);
+        for (let j = 0; j < 32; j++) {
+          t[j] ^= u[j];
+        }
+        if (iter % CHUNK_ITERS === 0) {
+          await yieldMacrotask();
+        }
+      }
+      out.set(t, (b - 1) * 32);
+      u.fill(0);
+      t.fill(0);
+    }
+    return out.subarray(0, dkLen);
+  } finally {
+    _shaW.fill(0);
+    workState.fill(0);
+    scratch64.fill(0);
+    saltPlusIndex.fill(0);
+    ctx.innerInit.fill(0);
+    ctx.outerInit.fill(0);
+  }
 }
 
 // ============================================================================
@@ -569,6 +635,11 @@ function aes256GcmEncryptPure(key32, iv12, plaintext, aad = new Uint8Array(0)) {
   combined.set(tag, ct.length);
   roundKeys.fill(0);
   keystream.fill(0);
+  h.fill(0);
+  s.fill(0);
+  j0.fill(0);
+  ej0.fill(0);
+  ctr.fill(0);
   return combined;
 }
 
@@ -600,6 +671,10 @@ function aes256GcmDecryptPure(key32, iv12, combinedCtTag, aad = new Uint8Array(0
 
   if (!constantTimeEqual(receivedTag, expectedTag)) {
     roundKeys.fill(0);
+    h.fill(0);
+    s.fill(0);
+    j0.fill(0);
+    ej0.fill(0);
     throw new Error("Authentication tag mismatch — wrong password or corrupted ciphertext");
   }
 
@@ -616,6 +691,11 @@ function aes256GcmDecryptPure(key32, iv12, combinedCtTag, aad = new Uint8Array(0
   }
   roundKeys.fill(0);
   keystream.fill(0);
+  h.fill(0);
+  s.fill(0);
+  j0.fill(0);
+  ej0.fill(0);
+  ctr.fill(0);
   return pt;
 }
 
@@ -649,7 +729,7 @@ async function pbkdf2Derive64(password, saltBytes, iterations) {
       );
       return new Uint8Array(bits);
     }
-    return pbkdf2Sha256Pure(pwBytes, saltBytes, iterations, 64);
+    return await pbkdf2Sha256PureAsync(pwBytes, saltBytes, iterations, 64);
   } finally {
     pwBytes.fill(0);
   }
@@ -768,7 +848,14 @@ export async function wrapDek(dekBytes, kekBytes, aadStr = "heyjournal:dek:v1") 
 
 export async function unwrapDek(wrappedDekJson, kekBytes, aadStr = "heyjournal:dek:v1") {
   const parsed = JSON.parse(wrappedDekJson);
-  if (!parsed || parsed.v !== 1 || parsed.alg !== "A256GCM") {
+  if (
+    !parsed ||
+    typeof parsed !== "object" ||
+    parsed.v !== 1 ||
+    parsed.alg !== "A256GCM" ||
+    typeof parsed.iv !== "string" ||
+    typeof parsed.ct !== "string"
+  ) {
     throw new Error("Unsupported vault key envelope");
   }
   const iv = base64ToBytes(parsed.iv);
@@ -799,7 +886,14 @@ export async function encryptJson(obj, dekBytes, aadStr = "") {
 
 export async function decryptJson(blobJson, dekBytes, aadStr = "") {
   const parsed = JSON.parse(blobJson);
-  if (!parsed || parsed.v !== 1 || parsed.alg !== "A256GCM") {
+  if (
+    !parsed ||
+    typeof parsed !== "object" ||
+    parsed.v !== 1 ||
+    parsed.alg !== "A256GCM" ||
+    typeof parsed.iv !== "string" ||
+    typeof parsed.ct !== "string"
+  ) {
     throw new Error("Unsupported encrypted payload envelope");
   }
   const iv = base64ToBytes(parsed.iv);
@@ -816,6 +910,7 @@ export async function decryptJson(blobJson, dekBytes, aadStr = "") {
 export const _pureJs = {
   sha256,
   pbkdf2Sha256Pure,
+  pbkdf2Sha256PureAsync,
   aes256GcmEncryptPure,
   aes256GcmDecryptPure,
 };

@@ -14,6 +14,7 @@ import json
 import os
 import re
 import secrets
+import shutil
 import signal
 import sqlite3
 import sys
@@ -121,11 +122,12 @@ def init_db():
                 );
 
                 CREATE TABLE IF NOT EXISTS entries (
-                    id TEXT PRIMARY KEY,
+                    id TEXT NOT NULL,
                     user_id TEXT NOT NULL,
                     ciphertext TEXT NOT NULL,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL,
+                    PRIMARY KEY (user_id, id),
                     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
                 );
 
@@ -136,6 +138,34 @@ def init_db():
                     ON sessions(user_id);
                 """
             )
+
+            # Migrate older SQLite databases whose `entries` table used a global single-column PK (`id`)
+            # instead of composite `(user_id, id)` — prevents cross-user ID collisions & ID existence leaks.
+            entry_pk_cols = [
+                row["name"]
+                for row in conn.execute("PRAGMA table_info(entries)").fetchall()
+                if row["pk"] > 0
+            ]
+            if entry_pk_cols == ["id"]:
+                conn.executescript(
+                    """
+                    CREATE TABLE entries_v2 (
+                        id TEXT NOT NULL,
+                        user_id TEXT NOT NULL,
+                        ciphertext TEXT NOT NULL,
+                        created_at TEXT NOT NULL,
+                        updated_at TEXT NOT NULL,
+                        PRIMARY KEY (user_id, id),
+                        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+                    );
+                    INSERT INTO entries_v2 (id, user_id, ciphertext, created_at, updated_at)
+                        SELECT id, user_id, ciphertext, created_at, updated_at FROM entries;
+                    DROP TABLE entries;
+                    ALTER TABLE entries_v2 RENAME TO entries;
+                    CREATE INDEX IF NOT EXISTS idx_entries_user_updated
+                        ON entries(user_id, updated_at DESC);
+                    """
+                )
 
             # Migrate older SQLite databases lacking optional recovery-key columns
             existing_cols = {
@@ -293,13 +323,18 @@ def discover_themes():
             if default_mode not in modes:
                 default_mode = modes[0]
 
+            try:
+                order_val = int(manifest.get("order", 100))
+            except (TypeError, ValueError):
+                order_val = 100
+
             found.append(
                 {
                     "id": theme_id,
                     "name": str(manifest.get("name") or theme_id),
                     "description": str(manifest.get("description") or ""),
                     "author": str(manifest.get("author") or ""),
-                    "order": int(manifest.get("order", 100)),
+                    "order": order_val,
                     "modes": modes,
                     "defaultMode": default_mode,
                     "defaultAccent": str(manifest.get("defaultAccent") or "#00ABA9"),
@@ -328,6 +363,7 @@ def discover_quizzes():
     One quiz per file; files starting with `_` or `.` are ignored.
     """
     found = []
+    seen_ids = set()
     if not os.path.isdir(QUIZZES_DIR):
         return found
 
@@ -345,12 +381,16 @@ def discover_quizzes():
             qid = str(quiz.get("id") or os.path.splitext(fname)[0]).strip()
             if not qid or not re.match(r"^[a-zA-Z0-9_-]+$", qid):
                 continue
+            if qid in seen_ids:
+                sys.stderr.write(f"[HeyJournal] Skipping duplicate quiz id '{qid}' in '{fname}'\n")
+                continue
             questions = quiz.get("questions")
             scoring = quiz.get("scoring")
             if not isinstance(questions, list) or len(questions) == 0:
                 continue
             if not isinstance(scoring, dict):
                 continue
+            seen_ids.add(qid)
             quiz["id"] = qid
             quiz["fileName"] = fname
             found.append(quiz)
@@ -420,7 +460,7 @@ def list_backups():
         return []
     result = []
     for fname in sorted(os.listdir(BACKUP_DIR), reverse=True):
-        if not (fname.startswith("journal-backup-") and fname.endswith(".db")):
+        if not BACKUP_FILE_RE.match(fname):
             continue
         fpath = os.path.join(BACKUP_DIR, fname)
         try:
@@ -441,16 +481,20 @@ def list_backups():
 
 def _backup_scheduler_loop(stop_event):
     """Runs daily at 3:00 AM local time (respecting TZ env var)."""
+    last_backup_day = None
     while not stop_event.is_set():
         now = datetime.now()
         next_run = now.replace(hour=3, minute=0, second=0, microsecond=0)
-        if next_run <= now:
+        if next_run <= now or last_backup_day == now.date():
             next_run += timedelta(days=1)
         wait_seconds = max(1.0, (next_run - now).total_seconds())
         if stop_event.wait(timeout=wait_seconds):
             break
+        if datetime.now() < next_run:
+            continue
         try:
             perform_sqlite_backup()
+            last_backup_day = datetime.now().date()
         except Exception as exc:
             sys.stderr.write(f"[HeyJournal] Nightly backup failed: {exc}\n")
 
@@ -489,6 +533,16 @@ _TRUSTED_PROXY_NETWORKS = (
 )
 
 
+def _is_private_proxy_hop(ip_str):
+    try:
+        addr = ipaddress.ip_address(ip_str)
+        if isinstance(addr, ipaddress.IPv6Address) and addr.ipv4_mapped:
+            addr = addr.ipv4_mapped
+        return any(addr in net for net in _TRUSTED_PROXY_NETWORKS)
+    except ValueError:
+        return False
+
+
 def _is_trusted_proxy_ip(peer_ip):
     """Returns True if forwarded proxy headers from `peer_ip` should be honored."""
     if TRUST_PROXY_MODE in ("1", "true", "yes", "on"):
@@ -496,13 +550,7 @@ def _is_trusted_proxy_ip(peer_ip):
     if TRUST_PROXY_MODE in ("0", "false", "no", "off"):
         return False
     # Default "auto": trust local/LAN/Docker/Tailscale reverse proxies only
-    try:
-        addr = ipaddress.ip_address(peer_ip)
-        if isinstance(addr, ipaddress.IPv6Address) and addr.ipv4_mapped:
-            addr = addr.ipv4_mapped
-        return any(addr in net for net in _TRUSTED_PROXY_NETWORKS)
-    except ValueError:
-        return False
+    return _is_private_proxy_hop(peer_ip)
 
 
 def _serialize_user_row(row):
@@ -520,6 +568,8 @@ def _serialize_user_row(row):
 
 
 class JournalRequestHandler(SimpleHTTPRequestHandler):
+    timeout = 30
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=PUBLIC_DIR, **kwargs)
 
@@ -542,9 +592,22 @@ class JournalRequestHandler(SimpleHTTPRequestHandler):
         if _is_trusted_proxy_ip(peer):
             xff = self.headers.get("X-Forwarded-For")
             if xff:
-                candidate = xff.split(",")[0].strip()
-                if candidate:
-                    return candidate
+                valid_ips = []
+                for part in xff.split(","):
+                    candidate = part.strip()
+                    if not candidate:
+                        continue
+                    try:
+                        ipaddress.ip_address(candidate)
+                        valid_ips.append(candidate)
+                    except ValueError:
+                        continue
+                # Walk right-to-left to resist client-supplied spoofed prefixes
+                for candidate in reversed(valid_ips):
+                    if not _is_private_proxy_hop(candidate):
+                        return candidate
+                if valid_ips:
+                    return valid_ips[0]
         return peer
 
     def list_directory(self, path):
@@ -602,6 +665,8 @@ class JournalRequestHandler(SimpleHTTPRequestHandler):
         if length == 0:
             return {}, None
         raw = self.rfile.read(length)
+        if len(raw) != length:
+            return None, "Incomplete request body"
         try:
             data = json.loads(raw.decode("utf-8"))
         except Exception:
@@ -702,12 +767,17 @@ class JournalRequestHandler(SimpleHTTPRequestHandler):
     def _dispatch_api(self, fn):
         try:
             fn()
+        except (BrokenPipeError, ConnectionResetError):
+            pass
         except Exception as exc:
             sys.stderr.write(f"[HeyJournal] Unhandled API error on {self.command} {self.path}: {exc}\n")
             try:
                 self._send_json(500, {"error": "Internal server error"})
             except Exception:
                 pass
+
+    def _has_dotfile_segment(self, path):
+        return any(seg.startswith(".") for seg in path.split("/") if seg)
 
     def do_HEAD(self):
         path = urlparse(self.path).path
@@ -723,6 +793,9 @@ class JournalRequestHandler(SimpleHTTPRequestHandler):
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.send_header("Content-Length", "0")
             self.end_headers()
+            return
+        if self._has_dotfile_segment(path):
+            self.send_error(404, "Not found")
             return
         if path == "/" or path == "":
             self.path = "/index.html"
@@ -756,6 +829,10 @@ class JournalRequestHandler(SimpleHTTPRequestHandler):
             return
         if path.startswith("/api/"):
             self._send_json(404, {"error": "API endpoint not found"})
+            return
+
+        if self._has_dotfile_segment(path):
+            self.send_error(404, "Not found")
             return
 
         # Static file serving (SPA root fallback to index.html for clean paths)
@@ -1517,7 +1594,6 @@ class JournalRequestHandler(SimpleHTTPRequestHandler):
                 current_ts = user["vault_meta_updated_at"] or ""
                 if (
                     isinstance(expected_updated_at, str)
-                    and current_ts
                     and expected_updated_at != current_ts
                 ):
                     self._send_json(
@@ -1557,8 +1633,8 @@ class JournalRequestHandler(SimpleHTTPRequestHandler):
                     self._send_json(401, {"error": "Authentication required"})
                     return
                 existing = conn.execute(
-                    "SELECT id FROM entries WHERE id = ?",
-                    (entry_id,),
+                    "SELECT id FROM entries WHERE id = ? AND user_id = ?",
+                    (entry_id, user["id"]),
                 ).fetchone()
                 if existing:
                     self._send_json(409, {"error": "Entry with this id already exists"})
@@ -1711,7 +1787,10 @@ class JournalRequestHandler(SimpleHTTPRequestHandler):
                     self._send_json(401, {"error": "Authentication required"})
                     return
                 for eid, ct in validated:
-                    existing = conn.execute("SELECT id FROM entries WHERE id = ?", (eid,)).fetchone()
+                    existing = conn.execute(
+                        "SELECT id FROM entries WHERE id = ? AND user_id = ?",
+                        (eid, user["id"]),
+                    ).fetchone()
                     if existing:
                         skipped_count += 1
                         continue
@@ -1894,13 +1973,13 @@ class JournalRequestHandler(SimpleHTTPRequestHandler):
             return
 
         with open(target_path, "rb") as fh:
-            data = fh.read()
-        self.send_response(200)
-        self.send_header("Content-Type", "application/octet-stream")
-        self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
-        self.send_header("Content-Length", str(len(data)))
-        self.end_headers()
-        self.wfile.write(data)
+            size = os.fstat(fh.fileno()).st_size
+            self.send_response(200)
+            self.send_header("Content-Type", "application/octet-stream")
+            self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
+            self.send_header("Content-Length", str(size))
+            self.end_headers()
+            shutil.copyfileobj(fh, self.wfile)
 
 
 def cli_list_users():

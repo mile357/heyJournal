@@ -26,7 +26,7 @@
       var link = document.createElement("link");
       link.id = "activeThemeStylesheet";
       link.rel = "stylesheet";
-      link.href = cached.stylesheetUrl + "?v=2";
+      link.href = cached.stylesheetUrl + "?v=4";
       document.head.appendChild(link);
     }
   } catch (e) {}

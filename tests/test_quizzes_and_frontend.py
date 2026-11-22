@@ -189,6 +189,23 @@ class TestQuizLibraryAndScoringEngine(unittest.TestCase):
         self.assertEqual(out["customLow"]["score"], 0)
         self.assertEqual(len(out["customEmpty"]["safetyFlags"]), 0)
 
+    def test_find_severity_band_handles_fractional_gaps_cleanly(self):
+        js = """
+        import { findSeverityBand } from "./public/quiz-engine.js";
+        const bands = [
+          { min: 0, max: 4, label: "Minimal", level: "low" },
+          { min: 5, max: 9, label: "Mild", level: "mild" },
+          { min: 20, max: 27, label: "Severe", level: "severe" }
+        ];
+        const gapLow = findSeverityBand(4.2, bands);
+        const gapHigh = findSeverityBand(4.8, bands);
+        const out = JSON.stringify({ gapLow, gapHigh });
+        if (typeof print === "function") print(out); else console.log(out);
+        """
+        out = json.loads(run_es_module(js))
+        self.assertEqual(out["gapLow"]["label"], "Minimal")
+        self.assertEqual(out["gapHigh"]["label"], "Mild")
+
 
 class TestFrontendSyntaxAndContracts(unittest.TestCase):
     def test_all_public_js_files_have_valid_syntax(self):
@@ -269,6 +286,31 @@ class TestFrontendSyntaxAndContracts(unittest.TestCase):
         with open(os.path.join(PUBLIC_DIR, "export.js"), "r", encoding="utf-8") as fh:
             export_src = fh.read()
         self.assertNotIn("onclick=", export_src)
+
+    def test_csv_escape_neutralizes_formulas_while_preserving_negative_numbers(self):
+        js = """
+        import { csvEscape } from "./public/export.js";
+        const out = JSON.stringify({
+          eq: csvEscape("=SUM(A1:A2)"),
+          plus: csvEscape("+cmd"),
+          at: csvEscape("@foo"),
+          dashText: csvEscape("- felt tired"),
+          negInt: csvEscape(-5),
+          negFloat: csvEscape("-2.5"),
+          comma: csvEscape("a, b"),
+          normal: csvEscape("slept well"),
+        });
+        if (typeof print === "function") print(out); else console.log(out);
+        """
+        out = json.loads(run_es_module(js))
+        self.assertEqual(out["eq"], "'=SUM(A1:A2)")
+        self.assertEqual(out["plus"], "'+cmd")
+        self.assertEqual(out["at"], "'@foo")
+        self.assertEqual(out["dashText"], "'- felt tired")
+        self.assertEqual(out["negInt"], "-5")
+        self.assertEqual(out["negFloat"], "-2.5")
+        self.assertEqual(out["comma"], '"a, b"')
+        self.assertEqual(out["normal"], "slept well")
 
 
 if __name__ == "__main__":

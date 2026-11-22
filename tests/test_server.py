@@ -629,6 +629,88 @@ class TestAdminAccountManagementAndBackups(BaseServerTestCase):
         self.assertNotIn(b"P" * 32, raw_db, "Raw client authKey must never be stored in SQLite")
         self.assertIn(b"A256GCM", raw_db)
 
+    def test_multi_user_entry_id_isolation_xff_spoof_resistance_and_dotfiles(self):
+        # 1. User B can import User A's exported entry IDs without colliding or leaking existence
+        (_, _, sc_a, _, _), _ = register_user("usera", "A")
+        (_, _, sc_b, _, _), _ = register_user("userb", "B")
+        cookie_a = extract_session_cookie(sc_a)
+        cookie_b = extract_session_cookie(sc_b)
+
+        st_a, _, _, _, _ = execute_request(
+            "POST", "/api/entries", cookie=cookie_a, body={"id": "shared-export-1", "ciphertext": make_fake_blob("entry-a-payload")}
+        )
+        self.assertEqual(st_a, 201)
+
+        st_b_imp, _, _, _, d_b_imp = execute_request(
+            "POST",
+            "/api/entries/batch",
+            cookie=cookie_b,
+            body={"entries": [{"id": "shared-export-1", "ciphertext": make_fake_blob("entry-b-payload")}]},
+        )
+        self.assertEqual(st_b_imp, 201)
+        self.assertEqual(d_b_imp["importedCount"], 1)
+        self.assertEqual(d_b_imp["skippedCount"], 0)
+
+        # 2. Vault meta 409 conflict detection works even when updated concurrently
+        st_v1, _, _, _, dv1 = execute_request("GET", "/api/vault", cookie=cookie_a)
+        self.assertEqual(st_v1, 200)
+        ts_meta = dv1["vaultMetaUpdatedAt"]
+        st_m1, _, _, _, dm1 = execute_request(
+            "PUT",
+            "/api/vault/meta",
+            cookie=cookie_a,
+            body={"vaultMeta": make_fake_blob("meta-v2"), "expectedUpdatedAt": ts_meta},
+        )
+        self.assertEqual(st_m1, 200)
+        st_m_conflict, _, _, _, _ = execute_request(
+            "PUT",
+            "/api/vault/meta",
+            cookie=cookie_a,
+            body={"vaultMeta": make_fake_blob("meta-stale"), "expectedUpdatedAt": ts_meta},
+        )
+        self.assertEqual(st_m_conflict, 409)
+
+        # 3. X-Forwarded-For spoofing resistance picks rightmost non-private hop
+        raw_req = (
+            b"GET /api/health HTTP/1.1\r\n"
+            b"Host: localhost:8080\r\n"
+            b"X-Forwarded-For: 1.2.3.4, 198.51.100.42, 172.18.0.5\r\n\r\n"
+        )
+        handler = MockHandler(raw_req)
+        self.assertEqual(handler._client_ip(), "198.51.100.42")
+
+        # 4. Dotfiles are never exposed by static file handler
+        st_dot, _, _, _, _ = execute_request("GET", "/.DS_Store")
+        self.assertEqual(st_dot, 404)
+
+    def test_entries_legacy_single_pk_migration(self):
+        # Simulate an older DB with single-column `id TEXT PRIMARY KEY` on `entries`
+        import sqlite3
+        with sqlite3.connect(server.DB_PATH) as conn:
+            conn.executescript(
+                """
+                DROP TABLE entries;
+                CREATE TABLE entries (
+                    id TEXT PRIMARY KEY,
+                    user_id TEXT NOT NULL,
+                    ciphertext TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+                );
+                """
+            )
+        server.init_db()
+        with sqlite3.connect(server.DB_PATH) as conn:
+            pk_cols = [
+                r[1]
+                for r in sorted(
+                    (r for r in conn.execute("PRAGMA table_info(entries)").fetchall() if r[5] > 0),
+                    key=lambda r: r[5],
+                )
+            ]
+        self.assertEqual(pk_cols, ["user_id", "id"])
+
 
 if __name__ == "__main__":
     unittest.main()

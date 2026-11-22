@@ -19,10 +19,10 @@ import {
   normalizeRecoveryKey,
   unwrapDek,
   wrapDek,
-} from "./crypto.js?v=2";
+} from "./crypto.js?v=4";
 
-import { findSeverityBand, formatScoreValue, getQuestionOptions, scoreQuiz } from "./quiz-engine.js?v=2";
-import { computeSeriesStats, filterPointsByRange, renderMetricChart } from "./charts.js?v=2";
+import { findSeverityBand, formatScoreValue, getQuestionOptions, scoreQuiz } from "./quiz-engine.js?v=4";
+import { computeSeriesStats, filterPointsByRange, renderMetricChart } from "./charts.js?v=4";
 import {
   ASSET_VERSION,
   ThemeRegistry,
@@ -33,13 +33,13 @@ import {
   getEffectiveThemeMode,
   getThemeAccents,
   sanitizeColor,
-} from "./theme-engine.js?v=2";
+} from "./theme-engine.js?v=4";
 import {
   downloadDecryptedCsv,
   downloadDecryptedJson,
   openPrintableClinicianSummary,
   openPrintableRecoverySheet,
-} from "./export.js?v=2";
+} from "./export.js?v=4";
 
 const SESSION_DEK_KEY = "heyjournal_session_dek_v1";
 const STAY_UNLOCKED_PREF_KEY = "heyjournal_stay_unlocked_pref_v1";
@@ -51,7 +51,7 @@ const DEFAULT_VAULT_META = {
     theme: "dark",
     accentColor: "#00ABA9",
     themeAccents: {},
-    autoLockMinutes: 0, // 0 = off; 15 / 30 / 60 minutes
+    autoLockMinutes: 60, // 0 = off; 15 / 30 / 60 minutes
   },
   metrics: [], // [{ id, kind: "number", name, unit, pinned, createdAt }]
   pinnedQuizIds: [], // ["phq-9", "gad-7"]
@@ -418,8 +418,12 @@ async function loadAndDecryptVault() {
 }
 
 function normalizeEntryData(raw, fallbackIso) {
+  const rawTs = raw && typeof raw.timestamp === "string" ? raw.timestamp : "";
+  const hasValidTs = rawTs && !Number.isNaN(Date.parse(rawTs));
+  const fallback =
+    fallbackIso && !Number.isNaN(Date.parse(fallbackIso)) ? fallbackIso : new Date().toISOString();
   return {
-    timestamp: raw && typeof raw.timestamp === "string" ? raw.timestamp : fallbackIso || new Date().toISOString(),
+    timestamp: hasValidTs ? rawTs : fallback,
     text: raw && typeof raw.text === "string" ? raw.text : "",
     numericMetrics: Array.isArray(raw && raw.numericMetrics) ? raw.numericMetrics : [],
     quizResults: Array.isArray(raw && raw.quizResults) ? raw.quizResults : [],
@@ -487,7 +491,7 @@ async function saveVaultMeta(toastMsg = "") {
     method: "PUT",
     body: {
       vaultMeta: encrypted,
-      expectedUpdatedAt: state.vaultMetaUpdatedAt || undefined,
+      expectedUpdatedAt: state.vaultMetaUpdatedAt ?? "",
     },
   });
   if (res.status === 409 && res.data && res.data.vaultMetaUpdatedAt) {
@@ -561,6 +565,9 @@ function renderShell() {
       const cnt = state.entries.length;
       subtitle.textContent = `${cnt} ${cnt === 1 ? "entry" : "entries"} · encrypted`;
     }
+    document.querySelectorAll("#primaryPivotNav .pivot-tab").forEach((btn) => {
+      btn.classList.toggle("active", btn.getAttribute("data-tab") === state.activeTab);
+    });
     renderActiveTab();
   } else {
     authScreen.classList.remove("hidden");
@@ -835,6 +842,11 @@ function renderAuthCard() {
 
 async function handleRegister(username, password, confirmPw, stayUnlocked) {
   state.authError = "";
+  if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]{1,31}$/.test(username)) {
+    state.authError = "Username must be 2–32 characters (letters, numbers, ., _, -) and start with a letter or number.";
+    renderAuthCard();
+    return;
+  }
   if (password.length < 8) {
     state.authError = "Please choose a password of at least 8 characters.";
     renderAuthCard();
@@ -849,13 +861,17 @@ async function handleRegister(username, password, confirmPw, stayUnlocked) {
   state.authBusy = true;
   renderAuthCard();
 
+  let kekBytes = null;
+  let dekBytes = null;
   try {
     const kdfSalt = generateSaltB64();
     const kdfIterations = DEFAULT_KDF_ITERATIONS;
-    const { authKeyB64, kekBytes } = await deriveAuthAndKek(password, kdfSalt, kdfIterations);
-    const dekBytes = generateDek();
+    const derived = await deriveAuthAndKek(password, kdfSalt, kdfIterations);
+    kekBytes = derived.kekBytes;
+    dekBytes = generateDek();
     const wrappedDek = await wrapDek(dekBytes, kekBytes);
     kekBytes.fill(0);
+    kekBytes = null;
 
     // Carry over only the visual theme/mode/accent picked on the login screen
     const initialMeta = structuredCloneSafe(DEFAULT_VAULT_META);
@@ -868,7 +884,7 @@ async function handleRegister(username, password, confirmPw, stayUnlocked) {
       method: "POST",
       body: {
         username,
-        authKey: authKeyB64,
+        authKey: derived.authKeyB64,
         kdfSalt,
         kdfIterations,
         wrappedDek,
@@ -877,7 +893,6 @@ async function handleRegister(username, password, confirmPw, stayUnlocked) {
     });
 
     if (!res.ok) {
-      dekBytes.fill(0);
       state.authError = (res.data && res.data.error) || "Registration failed.";
       state.authBusy = false;
       renderAuthCard();
@@ -889,6 +904,7 @@ async function handleRegister(username, password, confirmPw, stayUnlocked) {
     state.authStatus.userCount = Math.max(1, state.authStatus.userCount + 1);
     state.authUsernameDraft = "";
     state.dekBytes = dekBytes;
+    dekBytes = null; // Ownership transferred to state.dekBytes
     state.autoLockReason = "";
     state.lastActivityMs = Date.now();
     saveStayUnlockedPref(stayUnlocked);
@@ -909,6 +925,9 @@ async function handleRegister(username, password, confirmPw, stayUnlocked) {
     state.authError = err.message || "Encryption error during registration.";
     state.authBusy = false;
     renderAuthCard();
+  } finally {
+    if (kekBytes) kekBytes.fill(0);
+    if (dekBytes) dekBytes.fill(0);
   }
 }
 
@@ -923,6 +942,8 @@ async function handleLogin(username, password, stayUnlocked) {
   state.authBusy = true;
   renderAuthCard();
 
+  let kekBytes = null;
+  let dekBytes = null;
   try {
     const chal = await apiFetch("/api/auth/challenge", {
       method: "POST",
@@ -936,26 +957,26 @@ async function handleLogin(username, password, stayUnlocked) {
     }
 
     const { kdfSalt, kdfIterations } = chal.data;
-    const { authKeyB64, kekBytes } = await deriveAuthAndKek(password, kdfSalt, kdfIterations);
+    const derived = await deriveAuthAndKek(password, kdfSalt, kdfIterations);
+    kekBytes = derived.kekBytes;
 
     const res = await apiFetch("/api/auth/login", {
       method: "POST",
-      body: { username, authKey: authKeyB64 },
+      body: { username, authKey: derived.authKeyB64 },
     });
     if (!res.ok) {
-      kekBytes.fill(0);
       state.authError = (res.data && res.data.error) || "Invalid username or password.";
       state.authBusy = false;
       renderAuthCard();
       return;
     }
 
-    const dekBytes = await unwrapDek(res.data.user.wrappedDek, kekBytes);
-    kekBytes.fill(0);
+    dekBytes = await unwrapDek(res.data.user.wrappedDek, kekBytes);
     state.authStatus.authenticated = true;
     state.authStatus.user = res.data.user;
     state.authUsernameDraft = "";
     state.dekBytes = dekBytes;
+    dekBytes = null;
     state.autoLockReason = "";
     state.lastActivityMs = Date.now();
     saveStayUnlockedPref(stayUnlocked);
@@ -973,6 +994,9 @@ async function handleLogin(username, password, stayUnlocked) {
     state.authError = "Incorrect password or unable to decrypt vault key.";
     state.authBusy = false;
     renderAuthCard();
+  } finally {
+    if (kekBytes) kekBytes.fill(0);
+    if (dekBytes) dekBytes.fill(0);
   }
 }
 
@@ -988,11 +1012,14 @@ async function handleUnlockExistingSession(password, stayUnlocked) {
   state.authBusy = true;
   renderAuthCard();
 
+  let kekBytes = null;
+  let dekBytes = null;
   try {
-    const { kekBytes } = await deriveAuthAndKek(password, user.kdfSalt, user.kdfIterations);
-    const dekBytes = await unwrapDek(user.wrappedDek, kekBytes);
-    kekBytes.fill(0);
+    const derived = await deriveAuthAndKek(password, user.kdfSalt, user.kdfIterations);
+    kekBytes = derived.kekBytes;
+    dekBytes = await unwrapDek(user.wrappedDek, kekBytes);
     state.dekBytes = dekBytes;
+    dekBytes = null;
     state.autoLockReason = "";
     state.lastActivityMs = Date.now();
     saveStayUnlockedPref(stayUnlocked);
@@ -1009,6 +1036,9 @@ async function handleUnlockExistingSession(password, stayUnlocked) {
     state.authError = "Incorrect password.";
     state.authBusy = false;
     renderAuthCard();
+  } finally {
+    if (kekBytes) kekBytes.fill(0);
+    if (dekBytes) dekBytes.fill(0);
   }
 }
 
@@ -1034,6 +1064,9 @@ async function handleRecoverPassword(username, rawRecoveryKey, newPassword, conf
   state.authBusy = true;
   renderAuthCard();
 
+  let recKekBytes = null;
+  let newKekBytes = null;
+  let dekBytes = null;
   try {
     const chal = await apiFetch("/api/auth/recovery-challenge", {
       method: "POST",
@@ -1051,30 +1084,33 @@ async function handleRecoverPassword(username, rawRecoveryKey, newPassword, conf
       chal.data.recoveryKdfSalt,
       chal.data.recoveryKdfIterations
     );
+    recKekBytes = recDerived.kekBytes;
 
     const ver = await apiFetch("/api/auth/recovery-verify", {
       method: "POST",
       body: { username, recoveryAuthKey: recDerived.authKeyB64 },
     });
     if (!ver.ok) {
-      recDerived.kekBytes.fill(0);
       state.authError = (ver.data && ver.data.error) || "Invalid username or recovery key.";
       state.authBusy = false;
       renderAuthCard();
       return;
     }
 
-    const dekBytes = await unwrapDek(
+    dekBytes = await unwrapDek(
       ver.data.recoveryWrappedDek,
-      recDerived.kekBytes,
+      recKekBytes,
       "heyjournal:recovery-dek:v1"
     );
-    recDerived.kekBytes.fill(0);
+    recKekBytes.fill(0);
+    recKekBytes = null;
 
     const newSalt = generateSaltB64();
     const newDerived = await deriveAuthAndKek(newPassword, newSalt, DEFAULT_KDF_ITERATIONS);
-    const newWrappedDek = await wrapDek(dekBytes, newDerived.kekBytes);
-    newDerived.kekBytes.fill(0);
+    newKekBytes = newDerived.kekBytes;
+    const newWrappedDek = await wrapDek(dekBytes, newKekBytes);
+    newKekBytes.fill(0);
+    newKekBytes = null;
 
     const res = await apiFetch("/api/auth/recover", {
       method: "POST",
@@ -1088,7 +1124,6 @@ async function handleRecoverPassword(username, rawRecoveryKey, newPassword, conf
       },
     });
     if (!res.ok) {
-      dekBytes.fill(0);
       state.authError = (res.data && res.data.error) || "Could not complete password reset.";
       state.authBusy = false;
       renderAuthCard();
@@ -1101,6 +1136,7 @@ async function handleRecoverPassword(username, rawRecoveryKey, newPassword, conf
     state.autoLockReason = "";
     state.lastActivityMs = Date.now();
     state.dekBytes = dekBytes;
+    dekBytes = null;
     saveStayUnlockedPref(stayUnlocked);
     state.authBusy = false;
     const loaded = await loadAndDecryptVault();
@@ -1116,6 +1152,10 @@ async function handleRecoverPassword(username, rawRecoveryKey, newPassword, conf
     state.authError = "Invalid recovery key or unable to decrypt vault.";
     state.authBusy = false;
     renderAuthCard();
+  } finally {
+    if (recKekBytes) recKekBytes.fill(0);
+    if (newKekBytes) newKekBytes.fill(0);
+    if (dekBytes) dekBytes.fill(0);
   }
 }
 
@@ -1134,8 +1174,13 @@ function _wipeDecryptedMemoryState() {
   state.vaultMetaUpdatedAt = "";
   state.entries = [];
   state.draft = createFreshDraft();
+  state.activeTab = "input";
+  state.quizCategoryFilter = "All";
   state.reviewSearch = "";
   state.reviewMetricFilter = "all";
+  state.reportRange = "90d";
+  state.activeSubscaleByQuiz = {};
+  state.lastVaultSyncMs = 0;
   state.quizSearch = "";
   state.editingMetricId = null;
   state.openEntryMenuId = null;
@@ -1176,7 +1221,7 @@ async function handleLockOrLogout() {
 
 function checkAutoLock() {
   if (!state.authStatus.authenticated || !state.dekBytes) return;
-  const mins = Number(state.vaultMeta.settings?.autoLockMinutes || 0);
+  const mins = Number(state.vaultMeta.settings?.autoLockMinutes ?? 60);
   if (!Number.isFinite(mins) || mins <= 0) return;
   const elapsedMs = Date.now() - state.lastActivityMs;
   if (elapsedMs >= mins * 60 * 1000) {
@@ -1199,8 +1244,11 @@ async function syncVaultInBackground({ manual = false } = {}) {
         const cnt = state.entries.length;
         subtitle.textContent = `${cnt} ${cnt === 1 ? "entry" : "entries"} · encrypted`;
       }
-      // Preserve active Input draft uninterrupted; refresh Review/Report/Metrics live
-      if (state.activeTab !== "input") {
+      // Preserve active Input draft uninterrupted; refresh Input only if untouched, and always refresh Review/Report/Metrics
+      if (
+        state.activeTab !== "input" ||
+        (manual && !hasUnsavedDraft(state.draft) && !state.draft.showPicker && !state.draft.showTimestampEditor)
+      ) {
         renderActiveTab();
       }
       if (manual) showToast("Vault synced");
@@ -1214,14 +1262,17 @@ async function syncVaultInBackground({ manual = false } = {}) {
 }
 
 async function handleGenerateRecoveryKey() {
-  if (!state.dekBytes || !state.authStatus.user) return;
+  if (!state.dekBytes || !state.authStatus.user) return false;
+  let recKekBytes = null;
   try {
     const recoveryKey = generateRecoveryKey();
     const normalized = normalizeRecoveryKey(recoveryKey);
     const recSalt = generateSaltB64();
     const recDerived = await deriveAuthAndKek(normalized, recSalt, RECOVERY_KDF_ITERATIONS);
-    const recWrappedDek = await wrapDek(state.dekBytes, recDerived.kekBytes, "heyjournal:recovery-dek:v1");
-    recDerived.kekBytes.fill(0);
+    recKekBytes = recDerived.kekBytes;
+    const recWrappedDek = await wrapDek(state.dekBytes, recKekBytes, "heyjournal:recovery-dek:v1");
+    recKekBytes.fill(0);
+    recKekBytes = null;
 
     const res = await apiFetch("/api/auth/recovery-key", {
       method: "POST",
@@ -1234,7 +1285,7 @@ async function handleGenerateRecoveryKey() {
     });
     if (!res.ok) {
       showToast((res.data && res.data.error) || "Could not save recovery key");
-      return;
+      return false;
     }
     state.authStatus.user = res.data.user;
     if (state.flyoutOpen) renderFlyout();
@@ -1244,9 +1295,13 @@ async function handleGenerateRecoveryKey() {
       username: state.authStatus.user.username,
     };
     renderModal();
+    return true;
   } catch (err) {
     console.error(err);
     showToast("Encryption error generating recovery key");
+    return false;
+  } finally {
+    if (recKekBytes) recKekBytes.fill(0);
   }
 }
 
@@ -1317,7 +1372,7 @@ function renderInputTab(stage) {
                   <div class="quick-metric-card">
                     <div class="quick-metric-head">
                       <span class="quick-metric-name">${escapeHtml(q.name)}</span>
-                      <span class="quick-metric-unit">${q.questions.length}q · ${q.estimatedMinutes || 2}m</span>
+                      <span class="quick-metric-unit">${q.questions.length}q · ${escapeHtml(String(q.estimatedMinutes || 2))}m</span>
                     </div>
                     ${
                       done
@@ -1511,12 +1566,15 @@ function renderInputTab(stage) {
     renderInputTab(stage);
   });
 
-  stage.querySelector("#entryTimestampInput")?.addEventListener("change", (e) => {
+  const syncTimestampInput = (e) => {
     if (e.target.value) {
       state.draft.timestampLocal = e.target.value;
       state.draft.timestampManuallyEdited = true;
     }
-  });
+  };
+  const tsInput = stage.querySelector("#entryTimestampInput");
+  tsInput?.addEventListener("input", syncTimestampInput);
+  tsInput?.addEventListener("change", syncTimestampInput);
 
   stage.querySelector("#btnTimestampNow")?.addEventListener("click", () => {
     state.draft.timestampLocal = toLocalDateTimeInputValue(new Date());
@@ -1596,7 +1654,17 @@ function renderInputTab(stage) {
     renderInputTab(stage);
   });
 
-  stage.querySelector("#btnPickerApply")?.addEventListener("click", async () => {
+  const applyPickerBtn = stage.querySelector("#btnPickerApply");
+  const handlePickerEnter = (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      applyPickerBtn?.click();
+    }
+  };
+  numValEl?.addEventListener("keydown", handlePickerEnter);
+  stage.querySelector("#pickerNewVal")?.addEventListener("keydown", handlePickerEnter);
+
+  applyPickerBtn?.addEventListener("click", async () => {
     const val = selectEl.value;
     if (!val) return;
     if (val.startsWith("quiz:")) {
@@ -1609,7 +1677,8 @@ function renderInputTab(stage) {
     if (val.startsWith("num:")) {
       const mid = val.slice(4);
       const metric = state.vaultMeta.metrics.find((m) => m.id === mid);
-      const num = parseFloat(numValEl.value);
+      const rawNum = String(numValEl.value ?? "").trim();
+      const num = rawNum === "" ? NaN : Number(rawNum);
       if (!metric || !Number.isFinite(num)) {
         showToast("Enter a numeric value first");
         return;
@@ -1625,7 +1694,8 @@ function renderInputTab(stage) {
     if (val === "__new_numeric__") {
       const name = stage.querySelector("#pickerNewName").value.trim();
       const unit = stage.querySelector("#pickerNewUnit").value.trim();
-      const rawVal = stage.querySelector("#pickerNewVal").value;
+      const rawVal = String(stage.querySelector("#pickerNewVal").value ?? "").trim();
+      const parsedNewVal = rawVal === "" ? NaN : Number(rawVal);
       if (!name) {
         showToast("Enter a metric name");
         return;
@@ -1634,13 +1704,12 @@ function renderInputTab(stage) {
         (m) => m.name.toLowerCase() === name.toLowerCase()
       );
       if (existingMetric) {
-        if (rawVal !== "" && Number.isFinite(parseFloat(rawVal))) {
+        if (Number.isFinite(parsedNewVal)) {
           if (existingMetric.pinned) {
             state.draft.numericValues[existingMetric.id] = rawVal;
           } else {
-            const num = parseFloat(rawVal);
             const idx = state.draft.extraNumerics.findIndex((x) => x.metricId === existingMetric.id);
-            const item = { metricId: existingMetric.id, name: existingMetric.name, unit: existingMetric.unit || "", value: num };
+            const item = { metricId: existingMetric.id, name: existingMetric.name, unit: existingMetric.unit || "", value: parsedNewVal };
             if (idx >= 0) state.draft.extraNumerics[idx] = item;
             else state.draft.extraNumerics.push(item);
           }
@@ -1659,13 +1728,13 @@ function renderInputTab(stage) {
         createdAt: new Date().toISOString(),
       };
       state.vaultMeta.metrics.push(newMetric);
-      await saveVaultMeta();
-      if (rawVal !== "" && Number.isFinite(parseFloat(rawVal))) {
+      const saved = await saveVaultMeta();
+      if (Number.isFinite(parsedNewVal)) {
         state.draft.numericValues[newMetric.id] = rawVal;
       }
       state.draft.showPicker = false;
       renderInputTab(stage);
-      showToast(`Added "${name}" to your metrics`);
+      if (saved) showToast(`Added "${name}" to your metrics`);
     }
   });
 
@@ -1708,7 +1777,7 @@ async function handleSaveDraftEntry() {
     if (!m.pinned) continue;
     const raw = d.numericValues[m.id];
     if (raw !== undefined && raw !== null && String(raw).trim() !== "") {
-      const val = parseFloat(raw);
+      const val = Number(String(raw).trim());
       if (Number.isFinite(val)) {
         numericMap.set(m.id, { metricId: m.id, name: m.name, unit: m.unit || "", value: val });
       }
@@ -1996,8 +2065,8 @@ function renderMetricsTab(stage) {
               <p class="library-card-desc" style="margin-top:8px;">${escapeHtml(q.shortDescription || "")}</p>
               <div class="library-card-meta" style="margin-top:8px;">
                 <span>${q.questions.length} items</span>
-                <span>~${q.estimatedMinutes || 2} min</span>
-                <span>range ${scoring.min ?? 0}–${scoring.max ?? "?"} ${escapeHtml(scoring.unit || "")}</span>
+                <span>~${escapeHtml(String(q.estimatedMinutes || 2))} min</span>
+                <span>range ${escapeHtml(String(scoring.min ?? 0))}–${escapeHtml(String(scoring.max ?? "?"))} ${escapeHtml(scoring.unit || "")}</span>
                 ${cnt > 0 ? `<span><strong>${cnt} logged</strong></span>` : ""}
               </div>
             </div>
@@ -2295,7 +2364,7 @@ function renderReviewTab(stage) {
                           <div class="day-entry-head">
                             <span class="day-entry-time">${escapeHtml(formatEntryTime(entry.data.timestamp))}</span>
                             <div class="entry-menu-wrap">
-                              <button type="button" class="metro-ellipsis-btn" data-entry-menu="${escapeHtml(entry.id)}" aria-label="Entry options">
+                              <button type="button" class="metro-ellipsis-btn" data-entry-menu="${escapeHtml(entry.id)}" aria-label="Entry options" aria-expanded="${menuOpen}">
                                 <svg class="ellipsis-dots-svg" viewBox="0 0 18 4" aria-hidden="true">
                                   <circle cx="2" cy="2" r="1.75" fill="currentColor" />
                                   <circle cx="9" cy="2" r="1.75" fill="currentColor" />
@@ -2786,9 +2855,14 @@ function renderRecoveryPromptPanel(panel) {
   panel.querySelector("#btnCloseModal").addEventListener("click", closeModal);
   panel.querySelector("#btnPromptSkip").addEventListener("click", closeModal);
   panel.querySelector("#btnPromptGenRecovery").addEventListener("click", async (e) => {
-    e.currentTarget.disabled = true;
-    e.currentTarget.textContent = "generating...";
-    await handleGenerateRecoveryKey();
+    const btn = e.currentTarget;
+    btn.disabled = true;
+    btn.textContent = "generating...";
+    const ok = await handleGenerateRecoveryKey();
+    if (!ok && btn.isConnected) {
+      btn.disabled = false;
+      btn.textContent = "generate recovery key";
+    }
   });
 }
 
@@ -2882,7 +2956,7 @@ function renderQuizRunnerPanel(panel) {
                     <div class="subscale-card">
                       <div style="font-size:12px; color:var(--text-secondary);">${escapeHtml(sub.name)}</div>
                       <div style="font-size:20px; font-weight:500; margin-top:2px;">
-                        ${escapeHtml(String(sub.score))}${sub.max ? `<span style="font-size:12px; color:var(--text-muted);"> / ${sub.max}</span>` : ""}
+                        ${escapeHtml(String(sub.score))}${sub.max ? `<span style="font-size:12px; color:var(--text-muted);"> / ${escapeHtml(String(sub.max))}</span>` : ""}
                       </div>
                       ${sub.band ? `<div style="font-size:11px; color:var(--accent-text); margin-top:2px;">${escapeHtml(sub.band.label)}</div>` : ""}
                     </div>
@@ -2980,8 +3054,10 @@ function renderQuizRunnerPanel(panel) {
     });
     panel.querySelectorAll("[data-all-q]").forEach((btn) => {
       btn.addEventListener("click", () => {
+        const prevScroll = panel.scrollTop;
         ms.answers[btn.getAttribute("data-all-q")] = Number(btn.getAttribute("data-all-val"));
         renderQuizRunnerPanel(panel);
+        panel.scrollTop = prevScroll;
       });
     });
     panel.querySelector("#btnFinishQuiz").addEventListener("click", () => {
@@ -3134,7 +3210,7 @@ function renderQuizBreakdownPanel(panel) {
                   <div class="subscale-card">
                     <div style="font-size:12px; color:var(--text-secondary);">${escapeHtml(sub.name)}</div>
                     <div style="font-size:18px; font-weight:500; margin-top:2px;">
-                      ${escapeHtml(String(sub.score))}${sub.max ? `<span style="font-size:12px; color:var(--text-muted);"> / ${sub.max}</span>` : ""}
+                      ${escapeHtml(String(sub.score))}${sub.max ? `<span style="font-size:12px; color:var(--text-muted);"> / ${escapeHtml(String(sub.max))}</span>` : ""}
                     </div>
                     ${sub.band ? `<div style="font-size:11px; color:var(--accent-text);">${escapeHtml(sub.band.label)}</div>` : ""}
                   </div>
@@ -3229,6 +3305,10 @@ function renderFlyout() {
     state.flyoutTab = "appearance";
   }
 
+  const sameTab = panel.getAttribute("data-rendered-tab") === state.flyoutTab;
+  const prevScroll = sameTab ? panel.scrollTop : 0;
+  panel.setAttribute("data-rendered-tab", state.flyoutTab);
+
   panel.innerHTML = `
     <div class="flyout-head">
       <h2 class="flyout-title">settings</h2>
@@ -3270,6 +3350,7 @@ function renderFlyout() {
   } else if (state.flyoutTab === "admin") {
     renderAdminFlyoutTab(body);
   }
+  panel.scrollTop = prevScroll;
 }
 
 function renderAppearanceFlyoutTab(body, isUnlocked) {
@@ -3435,7 +3516,7 @@ function renderSecurityFlyoutTab(body) {
   const backendLabel = getCryptoBackendLabel();
   const isNative = isNativeWebCryptoAvailable();
   const user = state.authStatus.user || {};
-  const autoLockMinutes = Number(state.vaultMeta.settings?.autoLockMinutes || 0);
+  const autoLockMinutes = Number(state.vaultMeta.settings?.autoLockMinutes ?? 60);
   const kdfIters = Number(user.kdfIterations || DEFAULT_KDF_ITERATIONS);
 
   body.innerHTML = `
@@ -3815,9 +3896,22 @@ async function handleImportJsonFile(file) {
 
   let totalImported = 0;
   let serverSkipped = 0;
-  const CHUNK_SIZE = 200;
-  for (let i = 0; i < prepared.length; i += CHUNK_SIZE) {
-    const chunk = prepared.slice(i, i + CHUNK_SIZE);
+  const MAX_CHUNK_COUNT = 200;
+  const MAX_CHUNK_BYTES = 4 * 1024 * 1024;
+  let cursor = 0;
+  while (cursor < prepared.length) {
+    const chunk = [];
+    let chunkBytes = 0;
+    while (cursor < prepared.length && chunk.length < MAX_CHUNK_COUNT) {
+      const nextItem = prepared[cursor];
+      const estBytes = nextItem.ciphertext.length + nextItem.id.length + 32;
+      if (chunk.length > 0 && chunkBytes + estBytes > MAX_CHUNK_BYTES) {
+        break;
+      }
+      chunk.push(nextItem);
+      chunkBytes += estBytes;
+      cursor++;
+    }
     const res = await apiFetch("/api/entries/batch", {
       method: "POST",
       body: {
@@ -4044,7 +4138,10 @@ function renderAdminFlyoutTab(body) {
 function wireGlobalEvents() {
   document.getElementById("btnSettings")?.addEventListener("click", () => openFlyout("appearance"));
   document.getElementById("btnSyncVault")?.addEventListener("click", () => syncVaultInBackground({ manual: true }));
-  document.getElementById("btnLockVault")?.addEventListener("click", handleLockOrLogout);
+  document.getElementById("btnLockVault")?.addEventListener("click", () => {
+    lockVaultLocally();
+    showToast("Vault locked");
+  });
 
   // Track user activity (throttled) for configurable auto-lock inactivity timer
   const markActivity = () => {
