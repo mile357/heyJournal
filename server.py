@@ -4,9 +4,12 @@ HeyJournal — Zero-Knowledge Encrypted Journal Server
 Lightweight Python 3 stdlib + SQLite (WAL) API & Static Server.
 Runs identically on macOS and Linux/Coolify Docker with zero external dependencies.
 """
+import argparse
+import base64
 import contextlib
 import hashlib
 import hmac
+import ipaddress
 import json
 import os
 import re
@@ -33,19 +36,27 @@ QUIZZES_DIR = os.path.join(BASE_DIR, "quizzes")
 SESSION_COOKIE_NAME = "hj_session"
 SESSION_TTL_DAYS = max(1, int(os.environ.get("SESSION_TTL_DAYS", "14")))
 SERVER_AUTH_ITERATIONS = 100_000
+DEFAULT_CLIENT_KDF_ITERATIONS = 600_000  # OWASP 2023 PBKDF2-HMAC-SHA256 target for new/updated passwords
+RECOVERY_KDF_ITERATIONS = 150_000  # High-entropy 160-bit random recovery key KDF iterations
 MIN_CLIENT_KDF_ITERATIONS = 50_000
 MAX_CLIENT_KDF_ITERATIONS = 1_000_000
-MAX_BODY_BYTES = 4 * 1024 * 1024  # 4 MB max request body
+MAX_BODY_BYTES = 8 * 1024 * 1024  # 8 MB max request body (supports batched encrypted JSON imports)
 MAX_CIPHERTEXT_BYTES = 2 * 1024 * 1024
+MAX_BATCH_IMPORT_ENTRIES = 500
+TRUST_PROXY_MODE = os.environ.get("TRUST_PROXY", "auto").strip().lower()
 
 DB_LOCK = threading.RLock()
 RATE_LOCK = threading.Lock()
 RATE_BUCKETS = {}
 RATE_LIMIT_WINDOW_SECONDS = 60
-RATE_LIMIT_MAX_ATTEMPTS = int(os.environ.get("AUTH_RATE_LIMIT", "30"))
+RATE_LIMIT_MAX_ATTEMPTS = max(1, int(os.environ.get("AUTH_RATE_LIMIT", "30")))
+_LAST_RATE_PRUNE = 0.0
 
 USERNAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]{1,31}$")
 UUID_RE = re.compile(r"^[a-zA-Z0-9_-]{8,64}$")
+SAFE_FOLDER_RE = re.compile(r"^[a-zA-Z0-9._-]+$")
+NIGHTLY_BACKUP_RE = re.compile(r"^journal-backup-\d{4}-\d{2}-\d{2}\.db$")
+BACKUP_FILE_RE = re.compile(r"^journal-backup-\d{4}-\d{2}-\d{2}(?:-\d{6})?\.db$")
 
 
 def utc_now_iso():
@@ -86,12 +97,18 @@ def init_db():
                     display_username TEXT NOT NULL,
                     is_admin INTEGER NOT NULL DEFAULT 0,
                     kdf_salt TEXT NOT NULL,
-                    kdf_iterations INTEGER NOT NULL DEFAULT 150000,
+                    kdf_iterations INTEGER NOT NULL DEFAULT 600000,
                     auth_salt TEXT NOT NULL,
                     auth_hash TEXT NOT NULL,
                     wrapped_dek TEXT NOT NULL,
                     vault_meta TEXT NOT NULL DEFAULT '',
                     vault_meta_updated_at TEXT NOT NULL DEFAULT '',
+                    recovery_kdf_salt TEXT NOT NULL DEFAULT '',
+                    recovery_kdf_iterations INTEGER NOT NULL DEFAULT 0,
+                    recovery_auth_salt TEXT NOT NULL DEFAULT '',
+                    recovery_auth_hash TEXT NOT NULL DEFAULT '',
+                    recovery_wrapped_dek TEXT NOT NULL DEFAULT '',
+                    recovery_created_at TEXT NOT NULL DEFAULT '',
                     created_at TEXT NOT NULL
                 );
 
@@ -119,6 +136,22 @@ def init_db():
                     ON sessions(user_id);
                 """
             )
+
+            # Migrate older SQLite databases lacking optional recovery-key columns
+            existing_cols = {
+                row["name"] for row in conn.execute("PRAGMA table_info(users)").fetchall()
+            }
+            migrations = [
+                ("recovery_kdf_salt", "TEXT NOT NULL DEFAULT ''"),
+                ("recovery_kdf_iterations", "INTEGER NOT NULL DEFAULT 0"),
+                ("recovery_auth_salt", "TEXT NOT NULL DEFAULT ''"),
+                ("recovery_auth_hash", "TEXT NOT NULL DEFAULT ''"),
+                ("recovery_wrapped_dek", "TEXT NOT NULL DEFAULT ''"),
+                ("recovery_created_at", "TEXT NOT NULL DEFAULT ''"),
+            ]
+            for col_name, col_def in migrations:
+                if col_name not in existing_cols:
+                    conn.execute(f"ALTER TABLE users ADD COLUMN {col_name} {col_def}")
 
             # Ensure server challenge secret exists (for constant-appearance nonexistent-user challenges)
             row = conn.execute(
@@ -175,11 +208,11 @@ def _fake_challenge_salt(conn, username):
         username.strip().lower().encode("utf-8"),
         hashlib.sha256,
     ).digest()[:16]
-    import base64
     return base64.b64encode(digest).decode("ascii")
 
 
 def _validate_encrypted_blob(raw_str, allow_empty=False):
+    """Validates the client-side AES-256-GCM wire envelope without decrypting."""
     if raw_str == "" and allow_empty:
         return ""
     if not isinstance(raw_str, str):
@@ -197,6 +230,13 @@ def _validate_encrypted_blob(raw_str, allow_empty=False):
     iv = parsed.get("iv")
     ct = parsed.get("ct")
     if not isinstance(iv, str) or not isinstance(ct, str) or not iv or not ct:
+        return None
+    try:
+        iv_bytes = base64.b64decode(iv.encode("ascii"), validate=True)
+        ct_bytes = base64.b64decode(ct.encode("ascii"), validate=True)
+    except Exception:
+        return None
+    if len(iv_bytes) != 12 or len(ct_bytes) < 16:
         return None
     return raw_str
 
@@ -219,7 +259,7 @@ def discover_themes():
         return found
 
     for folder in sorted(os.listdir(themes_dir)):
-        if folder.startswith(("_", ".")):
+        if folder.startswith(("_", ".")) or not SAFE_FOLDER_RE.match(folder):
             continue
         folder_path = os.path.join(themes_dir, folder)
         if not os.path.isdir(folder_path):
@@ -274,7 +314,8 @@ def discover_themes():
                     "stylesheetUrl": f"/themes/{folder}/{rel_css}",
                 }
             )
-        except Exception:
+        except Exception as exc:
+            sys.stderr.write(f"[HeyJournal] Skipping invalid theme '{folder}': {exc}\n")
             continue
 
     found.sort(key=lambda t: (t.get("order", 100), t.get("name", "").lower()))
@@ -313,7 +354,8 @@ def discover_quizzes():
             quiz["id"] = qid
             quiz["fileName"] = fname
             found.append(quiz)
-        except Exception:
+        except Exception as exc:
+            sys.stderr.write(f"[HeyJournal] Skipping invalid quiz '{fname}': {exc}\n")
             continue
 
     found.sort(key=lambda q: (str(q.get("category") or "").lower(), str(q.get("name") or "").lower()))
@@ -330,35 +372,47 @@ def perform_sqlite_backup(tag=None):
     stamp = tag or datetime.now().strftime("%Y-%m-%d")
     backup_name = f"journal-backup-{stamp}.db"
     backup_path = os.path.join(BACKUP_DIR, backup_name)
-    tmp_path = backup_path + ".tmp"
+    tmp_path = f"{backup_path}.{os.getpid()}.{threading.get_ident()}.tmp"
 
     with DB_LOCK:
-        with _connect_db() as src_conn:
-            dst_conn = sqlite3.connect(tmp_path)
+        try:
+            with _connect_db() as src_conn:
+                dst_conn = sqlite3.connect(tmp_path)
+                try:
+                    src_conn.backup(dst_conn)
+                finally:
+                    dst_conn.close()
+            os.replace(tmp_path, backup_path)
+        except Exception:
             try:
-                src_conn.backup(dst_conn)
-            finally:
-                dst_conn.close()
-        os.replace(tmp_path, backup_path)
+                if os.path.exists(tmp_path):
+                    os.remove(tmp_path)
+            except OSError:
+                pass
+            raise
+        prune_old_backups()
 
-    prune_old_backups()
     return backup_name
 
 
 def prune_old_backups():
+    """Retains up to BACKUP_RETENTION_DAYS nightly backups and equally many manual snapshots."""
     if not os.path.isdir(BACKUP_DIR):
         return
-    files = sorted(
+    all_files = sorted(
         f for f in os.listdir(BACKUP_DIR)
         if f.startswith("journal-backup-") and f.endswith(".db")
     )
-    excess = len(files) - BACKUP_RETENTION_DAYS
-    if excess > 0:
-        for old_name in files[:excess]:
-            try:
-                os.remove(os.path.join(BACKUP_DIR, old_name))
-            except OSError:
-                pass
+    nightly = [f for f in all_files if NIGHTLY_BACKUP_RE.match(f)]
+    manual = [f for f in all_files if not NIGHTLY_BACKUP_RE.match(f)]
+    for bucket in (nightly, manual):
+        excess = len(bucket) - BACKUP_RETENTION_DAYS
+        if excess > 0:
+            for old_name in bucket[:excess]:
+                try:
+                    os.remove(os.path.join(BACKUP_DIR, old_name))
+                except OSError:
+                    pass
 
 
 def list_backups():
@@ -402,17 +456,53 @@ def _backup_scheduler_loop(stop_event):
 
 
 def _check_rate_limit(client_ip):
+    global _LAST_RATE_PRUNE
     now = time.monotonic()
+    cutoff = now - RATE_LIMIT_WINDOW_SECONDS
     with RATE_LOCK:
-        bucket = RATE_BUCKETS.get(client_ip, [])
-        cutoff = now - RATE_LIMIT_WINDOW_SECONDS
-        bucket = [t for t in bucket if t > cutoff]
+        # Periodically evict stale IPs so RATE_BUCKETS stays bounded on long-lived servers
+        if now - _LAST_RATE_PRUNE > RATE_LIMIT_WINDOW_SECONDS or len(RATE_BUCKETS) > 1000:
+            stale = [ip for ip, times in RATE_BUCKETS.items() if not times or times[-1] <= cutoff]
+            for ip in stale:
+                del RATE_BUCKETS[ip]
+            _LAST_RATE_PRUNE = now
+
+        bucket = [t for t in RATE_BUCKETS.get(client_ip, []) if t > cutoff]
         if len(bucket) >= RATE_LIMIT_MAX_ATTEMPTS:
             RATE_BUCKETS[client_ip] = bucket
             return False
         bucket.append(now)
         RATE_BUCKETS[client_ip] = bucket
         return True
+
+
+_TRUSTED_PROXY_NETWORKS = (
+    ipaddress.ip_network("127.0.0.0/8"),
+    ipaddress.ip_network("10.0.0.0/8"),
+    ipaddress.ip_network("172.16.0.0/12"),
+    ipaddress.ip_network("192.168.0.0/16"),
+    ipaddress.ip_network("100.64.0.0/10"),  # Tailscale / CGNAT
+    ipaddress.ip_network("169.254.0.0/16"),
+    ipaddress.ip_network("::1/128"),
+    ipaddress.ip_network("fc00::/7"),
+    ipaddress.ip_network("fe80::/10"),
+)
+
+
+def _is_trusted_proxy_ip(peer_ip):
+    """Returns True if forwarded proxy headers from `peer_ip` should be honored."""
+    if TRUST_PROXY_MODE in ("1", "true", "yes", "on"):
+        return True
+    if TRUST_PROXY_MODE in ("0", "false", "no", "off"):
+        return False
+    # Default "auto": trust local/LAN/Docker/Tailscale reverse proxies only
+    try:
+        addr = ipaddress.ip_address(peer_ip)
+        if isinstance(addr, ipaddress.IPv6Address) and addr.ipv4_mapped:
+            addr = addr.ipv4_mapped
+        return any(addr in net for net in _TRUSTED_PROXY_NETWORKS)
+    except ValueError:
+        return False
 
 
 def _serialize_user_row(row):
@@ -423,6 +513,8 @@ def _serialize_user_row(row):
         "kdfSalt": row["kdf_salt"],
         "kdfIterations": int(row["kdf_iterations"]),
         "wrappedDek": row["wrapped_dek"],
+        "hasRecoveryKey": bool(row["recovery_wrapped_dek"]),
+        "recoveryCreatedAt": row["recovery_created_at"] or "",
         "createdAt": row["created_at"],
     }
 
@@ -436,15 +528,29 @@ class JournalRequestHandler(SimpleHTTPRequestHandler):
             return
         super().log_message(format_str, *args)
 
+    def _peer_ip(self):
+        return self.client_address[0] if self.client_address else "127.0.0.1"
+
     def _is_https_request(self):
-        xfp = (self.headers.get("X-Forwarded-Proto") or "").lower()
+        if not _is_trusted_proxy_ip(self._peer_ip()):
+            return False
+        xfp = (self.headers.get("X-Forwarded-Proto") or "").split(",")[0].strip().lower()
         return xfp == "https"
 
     def _client_ip(self):
-        xff = self.headers.get("X-Forwarded-For")
-        if xff:
-            return xff.split(",")[0].strip()
-        return self.client_address[0] if self.client_address else "127.0.0.1"
+        peer = self._peer_ip()
+        if _is_trusted_proxy_ip(peer):
+            xff = self.headers.get("X-Forwarded-For")
+            if xff:
+                candidate = xff.split(",")[0].strip()
+                if candidate:
+                    return candidate
+        return peer
+
+    def list_directory(self, path):
+        # Never expose directory listings of `public/` or `public/themes/`
+        self.send_error(404, "Not found")
+        return None
 
     def _send_security_headers(self, is_api=False):
         self.send_header("X-Content-Type-Options", "nosniff")
@@ -507,16 +613,22 @@ class JournalRequestHandler(SimpleHTTPRequestHandler):
     def _check_csrf_origin(self):
         host = (self.headers.get("Host") or "").lower().strip()
         origin = self.headers.get("Origin")
-        if origin:
-            parsed = urlparse(origin)
+        if origin is not None:
+            parsed = urlparse(origin.strip())
             origin_host = (parsed.netloc or "").lower().strip()
-            if host and origin_host and origin_host != host:
+            # Reject `Origin: null`, non-http(s) schemes, or any mismatched host
+            if parsed.scheme not in ("http", "https") or not origin_host:
                 return False
+            if host and origin_host != host:
+                return False
+            return True
         referer = self.headers.get("Referer")
-        if not origin and referer:
-            parsed = urlparse(referer)
+        if referer is not None:
+            parsed = urlparse(referer.strip())
             ref_host = (parsed.netloc or "").lower().strip()
-            if host and ref_host and ref_host != host:
+            if parsed.scheme not in ("http", "https") or not ref_host:
+                return False
+            if host and ref_host != host:
                 return False
         return True
 
@@ -587,6 +699,35 @@ class JournalRequestHandler(SimpleHTTPRequestHandler):
     # ------------------------------------------------------------------
     # HTTP Method Dispatch
     # ------------------------------------------------------------------
+    def _dispatch_api(self, fn):
+        try:
+            fn()
+        except Exception as exc:
+            sys.stderr.write(f"[HeyJournal] Unhandled API error on {self.command} {self.path}: {exc}\n")
+            try:
+                self._send_json(500, {"error": "Internal server error"})
+            except Exception:
+                pass
+
+    def do_HEAD(self):
+        path = urlparse(self.path).path
+        if path == "/api/health":
+            body = json.dumps({"ok": True, "service": "heyjournal"}, separators=(",", ":")).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            return
+        if path.startswith("/api/"):
+            self.send_response(404)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
+        if path == "/" or path == "":
+            self.path = "/index.html"
+        super().do_HEAD()
+
     def do_GET(self):
         parsed = urlparse(self.path)
         path = parsed.path
@@ -595,19 +736,23 @@ class JournalRequestHandler(SimpleHTTPRequestHandler):
             self._send_json(200, {"ok": True, "service": "heyjournal"})
             return
         if path == "/api/themes":
-            self._send_json(200, {"themes": discover_themes()})
+            self._dispatch_api(lambda: self._send_json(200, {"themes": discover_themes()}))
             return
         if path == "/api/quizzes":
-            self._send_json(200, {"quizzes": discover_quizzes()})
+            self._dispatch_api(lambda: self._send_json(200, {"quizzes": discover_quizzes()}))
             return
         if path == "/api/auth/status":
-            self._handle_auth_status()
+            self._dispatch_api(self._handle_auth_status)
             return
         if path == "/api/vault":
-            self._handle_get_vault()
+            self._dispatch_api(self._handle_get_vault)
             return
         if path == "/api/admin/users":
-            self._handle_admin_list_users()
+            self._dispatch_api(self._handle_admin_list_users)
+            return
+        if path.startswith("/api/admin/backups/"):
+            fname = path[len("/api/admin/backups/"):].strip("/")
+            self._dispatch_api(lambda: self._handle_admin_download_backup(fname))
             return
         if path.startswith("/api/"):
             self._send_json(404, {"error": "API endpoint not found"})
@@ -624,26 +769,23 @@ class JournalRequestHandler(SimpleHTTPRequestHandler):
             return
 
         path = urlparse(self.path).path
-        if path == "/api/auth/challenge":
-            self._handle_auth_challenge()
-            return
-        if path == "/api/auth/register":
-            self._handle_auth_register()
-            return
-        if path == "/api/auth/login":
-            self._handle_auth_login()
-            return
-        if path == "/api/auth/logout":
-            self._handle_auth_logout()
-            return
-        if path == "/api/auth/change-password":
-            self._handle_change_password()
-            return
-        if path == "/api/entries":
-            self._handle_create_entry()
-            return
-        if path == "/api/admin/backup":
-            self._handle_admin_backup()
+        routes = {
+            "/api/auth/challenge": self._handle_auth_challenge,
+            "/api/auth/register": self._handle_auth_register,
+            "/api/auth/login": self._handle_auth_login,
+            "/api/auth/logout": self._handle_auth_logout,
+            "/api/auth/change-password": self._handle_change_password,
+            "/api/auth/recovery-key": self._handle_set_recovery_key,
+            "/api/auth/recovery-challenge": self._handle_recovery_challenge,
+            "/api/auth/recovery-verify": self._handle_recovery_verify,
+            "/api/auth/recover": self._handle_recover_password,
+            "/api/entries": self._handle_create_entry,
+            "/api/entries/batch": self._handle_batch_import_entries,
+            "/api/admin/backup": self._handle_admin_backup,
+        }
+        handler = routes.get(path)
+        if handler:
+            self._dispatch_api(handler)
             return
         self._send_json(404, {"error": "API endpoint not found"})
 
@@ -654,14 +796,18 @@ class JournalRequestHandler(SimpleHTTPRequestHandler):
 
         path = urlparse(self.path).path
         if path == "/api/vault/meta":
-            self._handle_update_vault_meta()
+            self._dispatch_api(self._handle_update_vault_meta)
             return
         if path == "/api/admin/settings":
-            self._handle_admin_update_settings()
+            self._dispatch_api(self._handle_admin_update_settings)
+            return
+        if path.startswith("/api/admin/users/") and path.endswith("/role"):
+            target_id = path[len("/api/admin/users/"):-len("/role")].strip("/")
+            self._dispatch_api(lambda: self._handle_admin_update_user_role(target_id))
             return
         if path.startswith("/api/entries/"):
             entry_id = path[len("/api/entries/"):].strip("/")
-            self._handle_update_entry(entry_id)
+            self._dispatch_api(lambda: self._handle_update_entry(entry_id))
             return
         self._send_json(404, {"error": "API endpoint not found"})
 
@@ -671,13 +817,19 @@ class JournalRequestHandler(SimpleHTTPRequestHandler):
             return
 
         path = urlparse(self.path).path
+        if path == "/api/auth/recovery-key":
+            self._dispatch_api(self._handle_delete_recovery_key)
+            return
+        if path == "/api/auth/account":
+            self._dispatch_api(self._handle_delete_own_account)
+            return
         if path.startswith("/api/entries/"):
             entry_id = path[len("/api/entries/"):].strip("/")
-            self._handle_delete_entry(entry_id)
+            self._dispatch_api(lambda: self._handle_delete_entry(entry_id))
             return
         if path.startswith("/api/admin/users/"):
             target_id = path[len("/api/admin/users/"):].strip("/")
-            self._handle_admin_delete_user(target_id)
+            self._dispatch_api(lambda: self._handle_admin_delete_user(target_id))
             return
         self._send_json(404, {"error": "API endpoint not found"})
 
@@ -720,7 +872,7 @@ class JournalRequestHandler(SimpleHTTPRequestHandler):
             self._send_json(400, {"error": err})
             return
         username = str(body.get("username") or "").strip()
-        if not username:
+        if not username or len(username) > 128:
             self._send_json(400, {"error": "Username is required"})
             return
 
@@ -743,7 +895,7 @@ class JournalRequestHandler(SimpleHTTPRequestHandler):
                         200,
                         {
                             "kdfSalt": _fake_challenge_salt(conn, username),
-                            "kdfIterations": 150_000,
+                            "kdfIterations": DEFAULT_CLIENT_KDF_ITERATIONS,
                         },
                     )
 
@@ -760,7 +912,7 @@ class JournalRequestHandler(SimpleHTTPRequestHandler):
         auth_key = str(body.get("authKey") or "").strip()
         kdf_salt = str(body.get("kdfSalt") or "").strip()
         try:
-            kdf_iterations = int(body.get("kdfIterations", 150_000))
+            kdf_iterations = int(body.get("kdfIterations", DEFAULT_CLIENT_KDF_ITERATIONS))
         except (TypeError, ValueError):
             self._send_json(400, {"error": "Invalid KDF iterations"})
             return
@@ -791,6 +943,10 @@ class JournalRequestHandler(SimpleHTTPRequestHandler):
             self._send_json(400, {"error": "Invalid encrypted vault metadata"})
             return
 
+        # Compute server-side PBKDF2 outside DB_LOCK so logins/saves stay unblocked
+        auth_salt = secrets.token_hex(16)
+        auth_hash = _derive_server_auth_hash(auth_key, auth_salt)
+
         with DB_LOCK:
             with _connect_db() as conn:
                 user_count = conn.execute("SELECT COUNT(*) AS cnt FROM users").fetchone()["cnt"]
@@ -809,33 +965,35 @@ class JournalRequestHandler(SimpleHTTPRequestHandler):
 
                 user_id = str(uuid.uuid4())
                 is_admin = 1 if user_count == 0 else 0
-                auth_salt = secrets.token_hex(16)
-                auth_hash = _derive_server_auth_hash(auth_key, auth_salt)
                 now_iso = utc_now_iso()
 
-                conn.execute(
-                    """
-                    INSERT INTO users (
-                        id, username, display_username, is_admin,
-                        kdf_salt, kdf_iterations, auth_salt, auth_hash,
-                        wrapped_dek, vault_meta, vault_meta_updated_at, created_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        user_id,
-                        username.lower(),
-                        username,
-                        is_admin,
-                        kdf_salt,
-                        kdf_iterations,
-                        auth_salt,
-                        auth_hash,
-                        wrapped_dek,
-                        vault_meta,
-                        now_iso if vault_meta else "",
-                        now_iso,
-                    ),
-                )
+                try:
+                    conn.execute(
+                        """
+                        INSERT INTO users (
+                            id, username, display_username, is_admin,
+                            kdf_salt, kdf_iterations, auth_salt, auth_hash,
+                            wrapped_dek, vault_meta, vault_meta_updated_at, created_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            user_id,
+                            username.lower(),
+                            username,
+                            is_admin,
+                            kdf_salt,
+                            kdf_iterations,
+                            auth_salt,
+                            auth_hash,
+                            wrapped_dek,
+                            vault_meta,
+                            now_iso if vault_meta else "",
+                            now_iso,
+                        ),
+                    )
+                except sqlite3.IntegrityError:
+                    self._send_json(409, {"error": "That username is already taken."})
+                    return
 
                 raw_token = self._create_session(conn, user_id)
                 user_row = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
@@ -862,29 +1020,39 @@ class JournalRequestHandler(SimpleHTTPRequestHandler):
 
         username = str(body.get("username") or "").strip()
         auth_key = str(body.get("authKey") or "").strip()
-        if not username or not auth_key:
+        if not username or len(username) > 128 or not auth_key or len(auth_key) > 256:
             self._send_json(400, {"error": "Username and password are required"})
             return
 
         with DB_LOCK:
             with _connect_db() as conn:
-                user_row = conn.execute(
+                row = conn.execute(
                     "SELECT * FROM users WHERE username = ?",
                     (username.lower(),),
                 ).fetchone()
-                if not user_row:
-                    # Burn equivalent PBKDF2 time to resist timing side-channels
-                    _derive_server_auth_hash(auth_key, "00" * 16)
+                user_row = dict(row) if row else None
+
+        # Run PBKDF2 outside DB_LOCK; burn equivalent time on missing user to resist timing leaks
+        if not user_row:
+            _derive_server_auth_hash(auth_key, "00" * 16)
+            self._send_json(401, {"error": "Invalid username or password"})
+            return
+
+        candidate_hash = _derive_server_auth_hash(auth_key, user_row["auth_salt"])
+        if not hmac.compare_digest(candidate_hash, user_row["auth_hash"]):
+            self._send_json(401, {"error": "Invalid username or password"})
+            return
+
+        with DB_LOCK:
+            with _connect_db() as conn:
+                # Re-verify user still exists before issuing session
+                fresh = conn.execute("SELECT * FROM users WHERE id = ?", (user_row["id"],)).fetchone()
+                if not fresh or not hmac.compare_digest(candidate_hash, fresh["auth_hash"]):
                     self._send_json(401, {"error": "Invalid username or password"})
                     return
-
-                candidate_hash = _derive_server_auth_hash(auth_key, user_row["auth_salt"])
-                if not hmac.compare_digest(candidate_hash, user_row["auth_hash"]):
-                    self._send_json(401, {"error": "Invalid username or password"})
-                    return
-
-                raw_token = self._create_session(conn, user_row["id"])
+                raw_token = self._create_session(conn, fresh["id"])
                 cookie_header = self._build_session_cookie(raw_token, max_age=SESSION_TTL_DAYS * 86400)
+                user_row = dict(fresh)
 
         self._send_json(
             200,
@@ -919,13 +1087,21 @@ class JournalRequestHandler(SimpleHTTPRequestHandler):
         new_auth_key = str(body.get("newAuthKey") or "").strip()
         new_kdf_salt = str(body.get("newKdfSalt") or "").strip()
         try:
-            new_kdf_iterations = int(body.get("newKdfIterations", 150_000))
+            new_kdf_iterations = int(body.get("newKdfIterations", DEFAULT_CLIENT_KDF_ITERATIONS))
         except (TypeError, ValueError):
             self._send_json(400, {"error": "Invalid KDF iterations"})
             return
         new_wrapped_dek = _validate_encrypted_blob(body.get("newWrappedDek"), allow_empty=False)
 
-        if not current_auth_key or len(new_auth_key) < 32 or len(new_kdf_salt) < 16 or new_wrapped_dek is None:
+        if (
+            not current_auth_key
+            or len(current_auth_key) > 256
+            or len(new_auth_key) < 32
+            or len(new_auth_key) > 256
+            or len(new_kdf_salt) < 16
+            or len(new_kdf_salt) > 128
+            or new_wrapped_dek is None
+        ):
             self._send_json(400, {"error": "Invalid password update payload"})
             return
         if not (MIN_CLIENT_KDF_ITERATIONS <= new_kdf_iterations <= MAX_CLIENT_KDF_ITERATIONS):
@@ -934,18 +1110,28 @@ class JournalRequestHandler(SimpleHTTPRequestHandler):
 
         with DB_LOCK:
             with _connect_db() as conn:
-                user = self._authenticate(conn)
-                if not user:
+                user_row = self._authenticate(conn)
+                if not user_row:
                     self._send_json(401, {"error": "Authentication required"})
                     return
+                user = dict(user_row)
 
-                candidate_hash = _derive_server_auth_hash(current_auth_key, user["auth_salt"])
-                if not hmac.compare_digest(candidate_hash, user["auth_hash"]):
-                    self._send_json(403, {"error": "Current password is incorrect"})
+        # Compute both PBKDF2 hashes outside DB_LOCK to avoid blocking other requests
+        candidate_hash = _derive_server_auth_hash(current_auth_key, user["auth_salt"])
+        if not hmac.compare_digest(candidate_hash, user["auth_hash"]):
+            self._send_json(403, {"error": "Current password is incorrect"})
+            return
+
+        new_auth_salt = secrets.token_hex(16)
+        new_auth_hash = _derive_server_auth_hash(new_auth_key, new_auth_salt)
+
+        with DB_LOCK:
+            with _connect_db() as conn:
+                # Guard against concurrent password change or revoked session
+                fresh = self._authenticate(conn)
+                if not fresh or fresh["id"] != user["id"] or not hmac.compare_digest(candidate_hash, fresh["auth_hash"]):
+                    self._send_json(401, {"error": "Session expired or password changed concurrently"})
                     return
-
-                new_auth_salt = secrets.token_hex(16)
-                new_auth_hash = _derive_server_auth_hash(new_auth_key, new_auth_salt)
 
                 conn.execute(
                     """
@@ -965,7 +1151,7 @@ class JournalRequestHandler(SimpleHTTPRequestHandler):
                 # Rotate all sessions for security
                 conn.execute("DELETE FROM sessions WHERE user_id = ?", (user["id"],))
                 raw_token = self._create_session(conn, user["id"])
-                updated_user = conn.execute("SELECT * FROM users WHERE id = ?", (user["id"],)).fetchone()
+                updated_user = dict(conn.execute("SELECT * FROM users WHERE id = ?", (user["id"],)).fetchone())
                 cookie_header = self._build_session_cookie(raw_token, max_age=SESSION_TTL_DAYS * 86400)
 
         self._send_json(
@@ -973,6 +1159,305 @@ class JournalRequestHandler(SimpleHTTPRequestHandler):
             {"ok": True, "user": _serialize_user_row(updated_user)},
             extra_headers=[("Set-Cookie", cookie_header)],
         )
+
+    # ------------------------------------------------------------------
+    # Zero-Knowledge Emergency Recovery Key & Self-Service Account Delete
+    # ------------------------------------------------------------------
+    def _handle_set_recovery_key(self):
+        if not _check_rate_limit(self._client_ip()):
+            self._send_json(429, {"error": "Too many attempts. Please wait a moment."})
+            return
+        body, err = self._read_json_body()
+        if err:
+            self._send_json(400, {"error": err})
+            return
+
+        rec_auth_key = str(body.get("recoveryAuthKey") or "").strip()
+        rec_kdf_salt = str(body.get("recoveryKdfSalt") or "").strip()
+        try:
+            rec_kdf_iterations = int(body.get("recoveryKdfIterations", RECOVERY_KDF_ITERATIONS))
+        except (TypeError, ValueError):
+            self._send_json(400, {"error": "Invalid recovery KDF iterations"})
+            return
+        rec_wrapped_dek = _validate_encrypted_blob(body.get("recoveryWrappedDek"), allow_empty=False)
+
+        if (
+            len(rec_auth_key) < 32
+            or len(rec_auth_key) > 256
+            or len(rec_kdf_salt) < 16
+            or len(rec_kdf_salt) > 128
+            or rec_wrapped_dek is None
+        ):
+            self._send_json(400, {"error": "Invalid recovery key payload"})
+            return
+        if not (MIN_CLIENT_KDF_ITERATIONS <= rec_kdf_iterations <= MAX_CLIENT_KDF_ITERATIONS):
+            self._send_json(400, {"error": "Recovery KDF iterations out of safe bounds"})
+            return
+
+        # Compute server-side PBKDF2 hash outside DB_LOCK
+        rec_auth_salt = secrets.token_hex(16)
+        rec_auth_hash = _derive_server_auth_hash(rec_auth_key, rec_auth_salt)
+        now_iso = utc_now_iso()
+
+        with DB_LOCK:
+            with _connect_db() as conn:
+                user = self._authenticate(conn)
+                if not user:
+                    self._send_json(401, {"error": "Authentication required"})
+                    return
+                conn.execute(
+                    """
+                    UPDATE users
+                    SET recovery_kdf_salt = ?, recovery_kdf_iterations = ?,
+                        recovery_auth_salt = ?, recovery_auth_hash = ?,
+                        recovery_wrapped_dek = ?, recovery_created_at = ?
+                    WHERE id = ?
+                    """,
+                    (
+                        rec_kdf_salt,
+                        rec_kdf_iterations,
+                        rec_auth_salt,
+                        rec_auth_hash,
+                        rec_wrapped_dek,
+                        now_iso,
+                        user["id"],
+                    ),
+                )
+                updated_user = dict(conn.execute("SELECT * FROM users WHERE id = ?", (user["id"],)).fetchone())
+
+        self._send_json(200, {"ok": True, "user": _serialize_user_row(updated_user)})
+
+    def _handle_delete_recovery_key(self):
+        with DB_LOCK:
+            with _connect_db() as conn:
+                user = self._authenticate(conn)
+                if not user:
+                    self._send_json(401, {"error": "Authentication required"})
+                    return
+                conn.execute(
+                    """
+                    UPDATE users
+                    SET recovery_kdf_salt = '', recovery_kdf_iterations = 0,
+                        recovery_auth_salt = '', recovery_auth_hash = '',
+                        recovery_wrapped_dek = '', recovery_created_at = ''
+                    WHERE id = ?
+                    """,
+                    (user["id"],),
+                )
+                updated_user = dict(conn.execute("SELECT * FROM users WHERE id = ?", (user["id"],)).fetchone())
+
+        self._send_json(200, {"ok": True, "user": _serialize_user_row(updated_user)})
+
+    def _handle_recovery_challenge(self):
+        if not _check_rate_limit(self._client_ip()):
+            self._send_json(429, {"error": "Too many attempts. Please wait a moment and try again."})
+            return
+        body, err = self._read_json_body()
+        if err:
+            self._send_json(400, {"error": err})
+            return
+        username = str(body.get("username") or "").strip()
+        if not username or len(username) > 128:
+            self._send_json(400, {"error": "Username is required"})
+            return
+
+        with DB_LOCK:
+            with _connect_db() as conn:
+                row = conn.execute(
+                    "SELECT recovery_kdf_salt, recovery_kdf_iterations, recovery_wrapped_dek FROM users WHERE username = ?",
+                    (username.lower(),),
+                ).fetchone()
+                if row and row["recovery_wrapped_dek"] and row["recovery_kdf_salt"]:
+                    self._send_json(
+                        200,
+                        {
+                            "recoveryKdfSalt": row["recovery_kdf_salt"],
+                            "recoveryKdfIterations": int(row["recovery_kdf_iterations"]),
+                        },
+                    )
+                else:
+                    # Constant-appearance salt prevents user/recovery-status enumeration
+                    self._send_json(
+                        200,
+                        {
+                            "recoveryKdfSalt": _fake_challenge_salt(conn, "recovery:" + username),
+                            "recoveryKdfIterations": RECOVERY_KDF_ITERATIONS,
+                        },
+                    )
+
+    def _handle_recovery_verify(self):
+        if not _check_rate_limit(self._client_ip()):
+            self._send_json(429, {"error": "Too many attempts. Please wait a moment and try again."})
+            return
+        body, err = self._read_json_body()
+        if err:
+            self._send_json(400, {"error": err})
+            return
+
+        username = str(body.get("username") or "").strip()
+        rec_auth_key = str(body.get("recoveryAuthKey") or "").strip()
+        if not username or len(username) > 128 or not rec_auth_key or len(rec_auth_key) > 256:
+            self._send_json(400, {"error": "Username and recovery key are required"})
+            return
+
+        with DB_LOCK:
+            with _connect_db() as conn:
+                row = conn.execute(
+                    "SELECT recovery_auth_salt, recovery_auth_hash, recovery_wrapped_dek FROM users WHERE username = ?",
+                    (username.lower(),),
+                ).fetchone()
+                user_rec = dict(row) if row else None
+
+        if not user_rec or not user_rec["recovery_auth_hash"] or not user_rec["recovery_wrapped_dek"]:
+            _derive_server_auth_hash(rec_auth_key, "00" * 16)
+            self._send_json(401, {"error": "Invalid username or recovery key"})
+            return
+
+        candidate_hash = _derive_server_auth_hash(rec_auth_key, user_rec["recovery_auth_salt"])
+        if not hmac.compare_digest(candidate_hash, user_rec["recovery_auth_hash"]):
+            self._send_json(401, {"error": "Invalid username or recovery key"})
+            return
+
+        self._send_json(200, {"ok": True, "recoveryWrappedDek": user_rec["recovery_wrapped_dek"]})
+
+    def _handle_recover_password(self):
+        if not _check_rate_limit(self._client_ip()):
+            self._send_json(429, {"error": "Too many attempts. Please wait a moment and try again."})
+            return
+        body, err = self._read_json_body()
+        if err:
+            self._send_json(400, {"error": err})
+            return
+
+        username = str(body.get("username") or "").strip()
+        rec_auth_key = str(body.get("recoveryAuthKey") or "").strip()
+        new_auth_key = str(body.get("newAuthKey") or "").strip()
+        new_kdf_salt = str(body.get("newKdfSalt") or "").strip()
+        try:
+            new_kdf_iterations = int(body.get("newKdfIterations", DEFAULT_CLIENT_KDF_ITERATIONS))
+        except (TypeError, ValueError):
+            self._send_json(400, {"error": "Invalid KDF iterations"})
+            return
+        new_wrapped_dek = _validate_encrypted_blob(body.get("newWrappedDek"), allow_empty=False)
+
+        if (
+            not username
+            or len(username) > 128
+            or not rec_auth_key
+            or len(rec_auth_key) > 256
+            or len(new_auth_key) < 32
+            or len(new_auth_key) > 256
+            or len(new_kdf_salt) < 16
+            or len(new_kdf_salt) > 128
+            or new_wrapped_dek is None
+        ):
+            self._send_json(400, {"error": "Invalid recovery payload"})
+            return
+        if not (MIN_CLIENT_KDF_ITERATIONS <= new_kdf_iterations <= MAX_CLIENT_KDF_ITERATIONS):
+            self._send_json(400, {"error": "KDF iterations out of safe bounds"})
+            return
+
+        with DB_LOCK:
+            with _connect_db() as conn:
+                row = conn.execute("SELECT * FROM users WHERE username = ?", (username.lower(),)).fetchone()
+                user = dict(row) if row else None
+
+        if not user or not user["recovery_auth_hash"] or not user["recovery_wrapped_dek"]:
+            _derive_server_auth_hash(rec_auth_key, "00" * 16)
+            self._send_json(401, {"error": "Invalid username or recovery key"})
+            return
+
+        candidate_hash = _derive_server_auth_hash(rec_auth_key, user["recovery_auth_salt"])
+        if not hmac.compare_digest(candidate_hash, user["recovery_auth_hash"]):
+            self._send_json(401, {"error": "Invalid username or recovery key"})
+            return
+
+        new_auth_salt = secrets.token_hex(16)
+        new_auth_hash = _derive_server_auth_hash(new_auth_key, new_auth_salt)
+
+        with DB_LOCK:
+            with _connect_db() as conn:
+                fresh = conn.execute("SELECT * FROM users WHERE id = ?", (user["id"],)).fetchone()
+                if not fresh or not hmac.compare_digest(candidate_hash, fresh["recovery_auth_hash"]):
+                    self._send_json(401, {"error": "Recovery key changed concurrently"})
+                    return
+                conn.execute(
+                    """
+                    UPDATE users
+                    SET kdf_salt = ?, kdf_iterations = ?, auth_salt = ?, auth_hash = ?, wrapped_dek = ?
+                    WHERE id = ?
+                    """,
+                    (
+                        new_kdf_salt,
+                        new_kdf_iterations,
+                        new_auth_salt,
+                        new_auth_hash,
+                        new_wrapped_dek,
+                        user["id"],
+                    ),
+                )
+                conn.execute("DELETE FROM sessions WHERE user_id = ?", (user["id"],))
+                raw_token = self._create_session(conn, user["id"])
+                updated_user = dict(conn.execute("SELECT * FROM users WHERE id = ?", (user["id"],)).fetchone())
+                cookie_header = self._build_session_cookie(raw_token, max_age=SESSION_TTL_DAYS * 86400)
+
+        self._send_json(
+            200,
+            {
+                "ok": True,
+                "user": _serialize_user_row(updated_user),
+                "vaultMeta": updated_user["vault_meta"],
+                "vaultMetaUpdatedAt": updated_user["vault_meta_updated_at"],
+            },
+            extra_headers=[("Set-Cookie", cookie_header)],
+        )
+
+    def _handle_delete_own_account(self):
+        if not _check_rate_limit(self._client_ip()):
+            self._send_json(429, {"error": "Too many attempts. Please wait a moment."})
+            return
+        body, err = self._read_json_body()
+        if err:
+            self._send_json(400, {"error": err})
+            return
+        current_auth_key = str(body.get("currentAuthKey") or "").strip()
+        if not current_auth_key or len(current_auth_key) > 256:
+            self._send_json(400, {"error": "Current password confirmation is required"})
+            return
+
+        with DB_LOCK:
+            with _connect_db() as conn:
+                row = self._authenticate(conn)
+                if not row:
+                    self._send_json(401, {"error": "Authentication required"})
+                    return
+                user = dict(row)
+
+        candidate_hash = _derive_server_auth_hash(current_auth_key, user["auth_salt"])
+        if not hmac.compare_digest(candidate_hash, user["auth_hash"]):
+            self._send_json(403, {"error": "Current password is incorrect"})
+            return
+
+        with DB_LOCK:
+            with _connect_db() as conn:
+                fresh = self._authenticate(conn)
+                if not fresh or fresh["id"] != user["id"]:
+                    self._send_json(401, {"error": "Authentication required"})
+                    return
+                if fresh["is_admin"]:
+                    admin_count = conn.execute("SELECT COUNT(*) AS cnt FROM users WHERE is_admin = 1").fetchone()["cnt"]
+                    if admin_count <= 1:
+                        self._send_json(
+                            400,
+                            {
+                                "error": "You are the only admin on this server. Promote another admin first or manage accounts from the server CLI."
+                            },
+                        )
+                        return
+                conn.execute("DELETE FROM users WHERE id = ?", (user["id"],))
+
+        clear_cookie = self._build_session_cookie("", max_age=0)
+        self._send_json(200, {"ok": True}, extra_headers=[("Set-Cookie", clear_cookie)])
 
     # ------------------------------------------------------------------
     # Encrypted Vault & Entries Handlers
@@ -1079,10 +1564,14 @@ class JournalRequestHandler(SimpleHTTPRequestHandler):
                     self._send_json(409, {"error": "Entry with this id already exists"})
                     return
                 now_iso = utc_now_iso()
-                conn.execute(
-                    "INSERT INTO entries (id, user_id, ciphertext, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
-                    (entry_id, user["id"], ciphertext, now_iso, now_iso),
-                )
+                try:
+                    conn.execute(
+                        "INSERT INTO entries (id, user_id, ciphertext, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+                        (entry_id, user["id"], ciphertext, now_iso, now_iso),
+                    )
+                except sqlite3.IntegrityError:
+                    self._send_json(409, {"error": "Entry with this id already exists"})
+                    return
 
         self._send_json(
             201,
@@ -1179,8 +1668,78 @@ class JournalRequestHandler(SimpleHTTPRequestHandler):
                     return
         self._send_json(200, {"ok": True, "deletedId": entry_id})
 
+    def _handle_batch_import_entries(self):
+        body, err = self._read_json_body()
+        if err:
+            self._send_json(400, {"error": err})
+            return
+        items = body.get("entries")
+        if not isinstance(items, list) or len(items) == 0:
+            self._send_json(400, {"error": "entries must be a non-empty array"})
+            return
+        if len(items) > MAX_BATCH_IMPORT_ENTRIES:
+            self._send_json(400, {"error": f"Batch size exceeds maximum of {MAX_BATCH_IMPORT_ENTRIES} entries"})
+            return
+
+        validated = []
+        seen_ids = set()
+        for item in items:
+            if not isinstance(item, dict):
+                self._send_json(400, {"error": "Each entry must be an object"})
+                return
+            eid = str(item.get("id") or "").strip() or str(uuid.uuid4())
+            if not UUID_RE.match(eid):
+                self._send_json(400, {"error": "Invalid entry id in import batch"})
+                return
+            ct = _validate_encrypted_blob(item.get("ciphertext"), allow_empty=False)
+            if ct is None:
+                self._send_json(400, {"error": "Invalid encrypted entry payload in import batch"})
+                return
+            if eid in seen_ids:
+                continue
+            seen_ids.add(eid)
+            validated.append((eid, ct))
+
+        imported = []
+        skipped_count = 0
+        now_iso = utc_now_iso()
+
+        with DB_LOCK:
+            with _connect_db() as conn:
+                user = self._authenticate(conn)
+                if not user:
+                    self._send_json(401, {"error": "Authentication required"})
+                    return
+                for eid, ct in validated:
+                    existing = conn.execute("SELECT id FROM entries WHERE id = ?", (eid,)).fetchone()
+                    if existing:
+                        skipped_count += 1
+                        continue
+                    conn.execute(
+                        "INSERT INTO entries (id, user_id, ciphertext, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+                        (eid, user["id"], ct, now_iso, now_iso),
+                    )
+                    imported.append(
+                        {
+                            "id": eid,
+                            "ciphertext": ct,
+                            "createdAt": now_iso,
+                            "updatedAt": now_iso,
+                        }
+                    )
+
+        self._send_json(
+            201,
+            {
+                "ok": True,
+                "imported": imported,
+                "importedCount": len(imported),
+                "skippedCount": skipped_count,
+            },
+        )
+
     # ------------------------------------------------------------------
-    # Admin Handlers (First User Only — Zero Access to User Data)
+    # Admin Handlers (Zero Access to User Data)
     # ------------------------------------------------------------------
     def _handle_admin_list_users(self):
         with DB_LOCK:
@@ -1279,6 +1838,127 @@ class JournalRequestHandler(SimpleHTTPRequestHandler):
         backup_name = perform_sqlite_backup(tag=stamp)
         self._send_json(200, {"ok": True, "backupName": backup_name, "backups": list_backups()})
 
+    def _handle_admin_update_user_role(self, target_id):
+        if not UUID_RE.match(target_id):
+            self._send_json(400, {"error": "Invalid user id"})
+            return
+        body, err = self._read_json_body()
+        if err:
+            self._send_json(400, {"error": err})
+            return
+        is_admin = body.get("isAdmin")
+        if not isinstance(is_admin, bool):
+            self._send_json(400, {"error": "isAdmin must be a boolean"})
+            return
+
+        with DB_LOCK:
+            with _connect_db() as conn:
+                user = self._authenticate(conn)
+                if not user:
+                    self._send_json(401, {"error": "Authentication required"})
+                    return
+                if not user["is_admin"]:
+                    self._send_json(403, {"error": "Admin privileges required"})
+                    return
+                target = conn.execute("SELECT id, is_admin FROM users WHERE id = ?", (target_id,)).fetchone()
+                if not target:
+                    self._send_json(404, {"error": "Account not found"})
+                    return
+                if target["is_admin"] and not is_admin:
+                    admin_count = conn.execute("SELECT COUNT(*) AS cnt FROM users WHERE is_admin = 1").fetchone()["cnt"]
+                    if admin_count <= 1:
+                        self._send_json(400, {"error": "Cannot remove admin role from the only admin."})
+                        return
+                conn.execute("UPDATE users SET is_admin = ? WHERE id = ?", (1 if is_admin else 0, target_id))
+
+        self._send_json(200, {"ok": True, "userId": target_id, "isAdmin": is_admin})
+
+    def _handle_admin_download_backup(self, filename):
+        with DB_LOCK:
+            with _connect_db() as conn:
+                user = self._authenticate(conn)
+                if not user:
+                    self._send_json(401, {"error": "Authentication required"})
+                    return
+                if not user["is_admin"]:
+                    self._send_json(403, {"error": "Admin privileges required"})
+                    return
+
+        if not BACKUP_FILE_RE.match(filename):
+            self._send_json(400, {"error": "Invalid backup filename"})
+            return
+        real_dir = os.path.realpath(BACKUP_DIR)
+        target_path = os.path.realpath(os.path.join(BACKUP_DIR, filename))
+        if not target_path.startswith(real_dir + os.sep) or not os.path.isfile(target_path):
+            self._send_json(404, {"error": "Backup file not found"})
+            return
+
+        with open(target_path, "rb") as fh:
+            data = fh.read()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/octet-stream")
+        self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+
+def cli_list_users():
+    init_db()
+    with DB_LOCK:
+        with _connect_db() as conn:
+            rows = conn.execute(
+                """
+                SELECT u.display_username, u.is_admin, u.created_at,
+                       CASE WHEN u.recovery_wrapped_dek != '' THEN 1 ELSE 0 END AS has_recovery,
+                       COUNT(e.id) AS entry_count
+                FROM users u
+                LEFT JOIN entries e ON e.user_id = u.id
+                GROUP BY u.id
+                ORDER BY u.created_at ASC
+                """
+            ).fetchall()
+    if not rows:
+        print("No registered users.")
+        return 0
+    for r in rows:
+        role = "admin" if r["is_admin"] else "user"
+        rec = "recovery-key" if r["has_recovery"] else "no-recovery-key"
+        print(f"{r['display_username']}\trole={role}\tentries={r['entry_count']}\t{rec}\tjoined={r['created_at']}")
+    return 0
+
+
+def cli_promote_admin(username):
+    init_db()
+    with DB_LOCK:
+        with _connect_db() as conn:
+            row = conn.execute(
+                "SELECT id, display_username, is_admin FROM users WHERE username = ?",
+                (username.strip().lower(),),
+            ).fetchone()
+            if not row:
+                sys.stderr.write(f"Error: user '{username}' not found.\n")
+                return 1
+            conn.execute("UPDATE users SET is_admin = 1 WHERE id = ?", (row["id"],))
+            print(f"Promoted '{row['display_username']}' to admin.")
+    return 0
+
+
+def cli_delete_user(username):
+    init_db()
+    with DB_LOCK:
+        with _connect_db() as conn:
+            row = conn.execute(
+                "SELECT id, display_username FROM users WHERE username = ?",
+                (username.strip().lower(),),
+            ).fetchone()
+            if not row:
+                sys.stderr.write(f"Error: user '{username}' not found.\n")
+                return 1
+            conn.execute("DELETE FROM users WHERE id = ?", (row["id"],))
+            print(f"Deleted user '{row['display_username']}' and all associated encrypted entries.")
+    return 0
+
 
 def run_server():
     init_db()
@@ -1292,6 +1972,7 @@ def run_server():
     backup_thread.start()
 
     httpd = ThreadingHTTPServer(("0.0.0.0", PORT), JournalRequestHandler)
+    httpd.daemon_threads = True
 
     def _shutdown(signum, frame):
         stop_event.set()
@@ -1308,5 +1989,21 @@ def run_server():
         httpd.server_close()
 
 
-if __name__ == "__main__":
+def main():
+    parser = argparse.ArgumentParser(description="HeyJournal zero-knowledge encrypted journal server")
+    parser.add_argument("--list-users", action="store_true", help="List registered accounts (no plaintext access)")
+    parser.add_argument("--promote-admin", metavar="USERNAME", help="Grant admin privileges to an existing account")
+    parser.add_argument("--delete-user", metavar="USERNAME", help="Permanently delete an account and its entries")
+    args = parser.parse_args()
+
+    if args.list_users:
+        sys.exit(cli_list_users())
+    if args.promote_admin:
+        sys.exit(cli_promote_admin(args.promote_admin))
+    if args.delete_user:
+        sys.exit(cli_delete_user(args.delete_user))
     run_server()
+
+
+if __name__ == "__main__":
+    main()

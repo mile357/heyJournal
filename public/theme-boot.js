@@ -18,11 +18,15 @@
       var meta = document.querySelector('meta[name="theme-color"]');
       if (meta) meta.setAttribute("content", cached.metaColor);
     }
-    if (cached.stylesheetUrl && /^\/themes\/[a-zA-Z0-9._\/-]+\.css$/.test(cached.stylesheetUrl)) {
+    if (
+      cached.stylesheetUrl &&
+      /^\/themes\/[a-zA-Z0-9._\/-]+\.css$/.test(cached.stylesheetUrl) &&
+      cached.stylesheetUrl.indexOf("..") === -1
+    ) {
       var link = document.createElement("link");
       link.id = "activeThemeStylesheet";
       link.rel = "stylesheet";
-      link.href = cached.stylesheetUrl + "?v=1";
+      link.href = cached.stylesheetUrl + "?v=2";
       document.head.appendChild(link);
     }
   } catch (e) {}

@@ -3,7 +3,7 @@
  * Directly compatible with FamilyCoordination's `public/themes/<id>/` format.
  */
 
-export const ASSET_VERSION = "1";
+export const ASSET_VERSION = "2";
 export const THEME_CACHE_KEY = "heyjournal_active_theme_cache_v1";
 
 export const METRO_ACCENTS = [
@@ -219,7 +219,11 @@ export function applyThemeAndAccent(settings) {
 
   const targetHref = themeDef.stylesheetUrl ? `${themeDef.stylesheetUrl}?v=${ASSET_VERSION}` : "";
   let link = document.getElementById("activeThemeStylesheet");
-  if (targetHref && /^\/themes\/[a-zA-Z0-9._\/-]+\.css\?v=/.test(targetHref)) {
+  if (
+    targetHref &&
+    /^\/themes\/[a-zA-Z0-9._\/-]+\.css\?v=/.test(targetHref) &&
+    !targetHref.includes("..")
+  ) {
     if (!link) {
       link = document.createElement("link");
       link.id = "activeThemeStylesheet";

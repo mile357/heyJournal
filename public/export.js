@@ -3,7 +3,13 @@
  * All formatting happens strictly in the browser using already-decrypted data.
  */
 
-import { computeSeriesStats, filterPointsByRange } from "./charts.js";
+import { computeSeriesStats, filterPointsByRange } from "./charts.js?v=2";
+
+function formatLocalDatePart(date) {
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) return "";
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}
 
 function triggerDownload(filename, content, mimeType) {
   const blob = new Blob([content], { type: mimeType });
@@ -92,7 +98,7 @@ export function downloadDecryptedCsv(entries) {
   const rows = [header.map(csvEscape).join(",")];
   for (const e of sorted) {
     const dt = new Date(e.data.timestamp);
-    const datePart = Number.isNaN(dt.getTime()) ? "" : dt.toISOString().slice(0, 10);
+    const datePart = formatLocalDatePart(dt);
     const numMap = {};
     for (const m of e.data.numericMetrics || []) {
       const k = m.unit ? `${m.name} (${m.unit})` : m.name;
@@ -194,21 +200,32 @@ export function openPrintableClinicianSummary({
     })
     .join("");
 
-  const recentNotesHtml = includeJournalNotes
-    ? [...entries]
-        .filter((e) => (e.data.text || "").trim().length > 0)
-        .sort((a, b) => new Date(b.data.timestamp).getTime() - new Date(a.data.timestamp).getTime())
+  const rangedNotes = includeJournalNotes
+    ? filterPointsByRange(
+        entries
+          .filter((e) => (e.data.text || "").trim().length > 0)
+          .map((e) => ({ tsMs: new Date(e.data.timestamp).getTime(), value: 1, raw: e })),
+        rangeKey
+      )
+        .reverse()
         .slice(0, 20)
-        .map(
-          (e) => `
+    : [];
+
+  const recentNotesHtml = rangedNotes
+    .map(
+      ({ raw: e }) => `
           <div class="note-item">
             <div class="note-date">${htmlEscape(new Date(e.data.timestamp).toLocaleString())}</div>
             <div class="note-body">${htmlEscape(e.data.text).replace(/\n/g, "<br/>")}</div>
           </div>
         `
-        )
-        .join("")
-    : "";
+    )
+    .join("");
+
+  const scriptOrigin =
+    typeof window !== "undefined" && window.location && /^https?:\/\//.test(window.location.origin)
+      ? window.location.origin
+      : "";
 
   const docHtml = `<!DOCTYPE html>
 <html lang="en">
@@ -229,13 +246,16 @@ export function openPrintableClinicianSummary({
     .note-date { font-size: 12px; font-weight: 600; color: #444; margin-bottom: 4px; }
     .note-body { font-size: 13px; }
     .disclaimer { margin-top: 28px; padding-top: 10px; border-top: 1px solid #ddd; font-size: 11px; color: #666; }
-    .print-bar { margin-bottom: 18px; }
+    .print-bar { margin-bottom: 18px; display: flex; align-items: center; gap: 12px; }
     .print-btn { padding: 8px 16px; font-size: 13px; cursor: pointer; background: #111; color: #fff; border: none; }
     @media print { .print-bar { display: none; } body { margin: 16px; } }
   </style>
 </head>
 <body>
-  <div class="print-bar"><button class="print-btn" onclick="window.print()">Print / Save as PDF</button></div>
+  <div class="print-bar">
+    <button type="button" class="print-btn" id="btnPrintSummaryDoc">Print / Save as PDF</button>
+    <span class="muted">or press Ctrl/Cmd + P</span>
+  </div>
   <h1>HeyJournal — Longitudinal Summary</h1>
   <div class="meta">Account: ${htmlEscape(username)} · Period: ${htmlEscape(rangeLabel)} · Generated: ${htmlEscape(generated)}</div>
 
@@ -255,22 +275,102 @@ export function openPrintableClinicianSummary({
 
   ${
     recentNotesHtml
-      ? `<h2>Recent Journal Excerpts (Up to 20)</h2>${recentNotesHtml}`
+      ? `<h2>Recent Journal Excerpts in Period (Up to 20)</h2>${recentNotesHtml}`
       : ""
   }
 
   <div class="disclaimer">
     Generated locally on the user's device from client-side decrypted HeyJournal records. Self-assessment scores are provided for longitudinal tracking and discussion with a qualified clinician and do not constitute a medical diagnosis.
   </div>
+  ${scriptOrigin ? `<script src="${htmlEscape(scriptOrigin)}/print-summary.js?v=2"></script>` : ""}
 </body>
 </html>`;
 
   const blob = new Blob([docHtml], { type: "text/html;charset=utf-8" });
   const url = URL.createObjectURL(blob);
-  const win = window.open(url, "_blank", "noopener,noreferrer");
-  if (!win) {
+  const win = window.open(url, "_blank");
+  if (win) {
+    try {
+      win.opener = null;
+    } catch (e) {}
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+  } else {
+    URL.revokeObjectURL(url);
     // Fallback if popup blocked: trigger download of the printable HTML
-    const stamp = new Date().toISOString().slice(0, 10);
+    const stamp = formatLocalDatePart(new Date()) || new Date().toISOString().slice(0, 10);
     triggerDownload(`heyjournal-clinician-summary-${stamp}.html`, docHtml, "text/html;charset=utf-8");
+  }
+}
+
+export function openPrintableRecoverySheet({ username = "", recoveryKey = "", serverUrl = "" }) {
+  const generated = new Date().toLocaleString();
+  const scriptOrigin =
+    typeof window !== "undefined" && window.location && /^https?:\/\//.test(window.location.origin)
+      ? window.location.origin
+      : "";
+  const originLabel = serverUrl || scriptOrigin || "your HeyJournal server";
+
+  const docHtml = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>HeyJournal — Emergency Recovery Key</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; color: #111; margin: 40px; line-height: 1.5; max-width: 680px; }
+    h1 { font-size: 24px; font-weight: 600; margin: 0 0 6px 0; }
+    .meta { color: #555; font-size: 13px; margin-bottom: 24px; }
+    .key-box { border: 2px solid #111; padding: 20px 24px; background: #f8f8f8; margin: 20px 0; text-align: center; }
+    .key-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: #555; margin-bottom: 8px; }
+    .key-val { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 20px; font-weight: 700; letter-spacing: 0.06em; word-break: break-all; }
+    .warn { border-left: 4px solid #a20025; background: #fff5f6; padding: 12px 16px; font-size: 13px; margin: 20px 0; }
+    ol { padding-left: 20px; font-size: 14px; }
+    li { margin-bottom: 6px; }
+    .print-bar { margin-bottom: 20px; display: flex; align-items: center; gap: 12px; }
+    .print-btn { padding: 8px 16px; font-size: 13px; cursor: pointer; background: #111; color: #fff; border: none; }
+    .muted { color: #555; font-size: 12px; }
+    @media print { .print-bar { display: none; } body { margin: 20px; } }
+  </style>
+</head>
+<body>
+  <div class="print-bar">
+    <button type="button" class="print-btn" id="btnPrintSummaryDoc">Print / Save as PDF</button>
+    <span class="muted">or press Ctrl/Cmd + P</span>
+  </div>
+  <h1>HeyJournal — Emergency Recovery Kit</h1>
+  <div class="meta">Account: <strong>${htmlEscape(username)}</strong> · Server: ${htmlEscape(originLabel)} · Created: ${htmlEscape(generated)}</div>
+
+  <div class="key-box">
+    <div class="key-label">Zero-Knowledge Emergency Recovery Key</div>
+    <div class="key-val">${htmlEscape(recoveryKey)}</div>
+  </div>
+
+  <div class="warn">
+    <strong>Keep this sheet somewhere safe and private</strong> (such as a home safe or password manager).
+    Anyone with your username and this recovery key can reset your password and decrypt your journal.
+    The server never stores this key and cannot display it again.
+  </div>
+
+  <h3>How to recover your journal if you forget your password</h3>
+  <ol>
+    <li>Open <strong>${htmlEscape(originLabel)}</strong> and click <strong>use recovery key</strong> on the sign-in screen.</li>
+    <li>Enter your username (<strong>${htmlEscape(username)}</strong>) and the 32-character key above.</li>
+    <li>Choose a new password. Your browser will decrypt your vault key locally and re-lock it with your new password without losing any entries.</li>
+  </ol>
+  ${scriptOrigin ? `<script src="${htmlEscape(scriptOrigin)}/print-summary.js?v=2"></script>` : ""}
+</body>
+</html>`;
+
+  const blob = new Blob([docHtml], { type: "text/html;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const win = window.open(url, "_blank");
+  if (win) {
+    try {
+      win.opener = null;
+    } catch (e) {}
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+  } else {
+    URL.revokeObjectURL(url);
+    const stamp = formatLocalDatePart(new Date()) || new Date().toISOString().slice(0, 10);
+    triggerDownload(`heyjournal-recovery-kit-${stamp}.html`, docHtml, "text/html;charset=utf-8");
   }
 }

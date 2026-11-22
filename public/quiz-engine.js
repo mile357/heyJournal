@@ -64,6 +64,7 @@ export function scoreQuiz(quiz, answersMap = {}) {
   const multiplier = typeof scoring.multiplier === "number" ? scoring.multiplier : 1;
 
   let rawSum = 0;
+  let rawMinPossible = 0;
   let rawMaxPossible = 0;
   let answeredCount = 0;
   const effectiveById = {};
@@ -81,14 +82,18 @@ export function scoreQuiz(quiz, answersMap = {}) {
     }
     if (!q.excludeFromTotal) {
       const opts = getQuestionOptions(quiz, q);
-      const maxOpt = opts.reduce((acc, o) => Math.max(acc, Number(o.value) || 0), 0);
-      rawMaxPossible += maxOpt;
+      const optVals = opts.map((o) => Number(o.value)).filter(Number.isFinite);
+      if (optVals.length > 0) {
+        rawMinPossible += Math.min(...optVals);
+        rawMaxPossible += Math.max(...optVals);
+      }
     }
   }
 
   let score;
   if (method === "percentage") {
-    score = rawMaxPossible > 0 ? Math.round((rawSum / rawMaxPossible) * 100) : 0;
+    const span = rawMaxPossible - rawMinPossible;
+    score = span > 0 ? Math.round(((rawSum - rawMinPossible) / span) * 100) : 0;
   } else {
     score = Math.round(rawSum * multiplier * 100) / 100;
   }
@@ -127,7 +132,7 @@ export function scoreQuiz(quiz, answersMap = {}) {
   if (Array.isArray(scoring.safetyFlags)) {
     for (const flag of scoring.safetyFlags) {
       const val = answersMap[flag.questionId];
-      if (val !== undefined && val !== null && Number(val) >= Number(flag.minValue ?? 1)) {
+      if (val !== undefined && val !== null && val !== "" && Number.isFinite(Number(val)) && Number(val) >= Number(flag.minValue ?? 1)) {
         triggeredSafetyFlags.push({
           questionId: flag.questionId,
           value: Number(val),
@@ -140,7 +145,7 @@ export function scoreQuiz(quiz, answersMap = {}) {
   // Normalized answer details for encrypted archival & later review
   const answerDetails = questions.map((q) => {
     const raw = answersMap[q.id];
-    const hasAnswer = raw !== undefined && raw !== null && raw !== "";
+    const hasAnswer = raw !== undefined && raw !== null && raw !== "" && Number.isFinite(Number(raw));
     const opts = getQuestionOptions(quiz, q);
     const chosenOpt = hasAnswer ? opts.find((o) => Number(o.value) === Number(raw)) : null;
     return {

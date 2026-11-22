@@ -12,9 +12,12 @@
  * created on HTTP decrypts seamlessly on HTTPS and vice versa.
  */
 
-export const DEFAULT_KDF_ITERATIONS = 150000;
+export const DEFAULT_KDF_ITERATIONS = 600000;
+export const RECOVERY_KDF_ITERATIONS = 150000;
 const GCM_IV_BYTES = 12;
 const GCM_TAG_BYTES = 16;
+// Standard Crockford Base32 alphabet (exactly 32 chars; omits I, L, O, U)
+const RECOVERY_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 
 function utf8Encode(str) {
   if (typeof TextEncoder !== "undefined") {
@@ -215,6 +218,9 @@ function makeHmacSha256Context(keyBytes) {
   sha256CompressBlock(innerInit, ipad, 0);
   const outerInit = new Uint32Array(SHA256_IV);
   sha256CompressBlock(outerInit, opad, 0);
+  keyBlock.fill(0);
+  ipad.fill(0);
+  opad.fill(0);
   return { innerInit, outerInit };
 }
 
@@ -304,6 +310,9 @@ function hmacSha256Block32(ctx, block32, outState, scratch64) {
 }
 
 function pbkdf2Sha256Pure(passwordBytes, saltBytes, iterations, dkLen) {
+  if (!Number.isInteger(iterations) || iterations < 1) {
+    throw new Error("PBKDF2 iterations must be a positive integer");
+  }
   const ctx = makeHmacSha256Context(passwordBytes);
   const blockCount = Math.ceil(dkLen / 32);
   const out = new Uint8Array(blockCount * 32);
@@ -558,6 +567,8 @@ function aes256GcmEncryptPure(key32, iv12, plaintext, aad = new Uint8Array(0)) {
   const combined = new Uint8Array(ct.length + GCM_TAG_BYTES);
   combined.set(ct, 0);
   combined.set(tag, ct.length);
+  roundKeys.fill(0);
+  keystream.fill(0);
   return combined;
 }
 
@@ -588,6 +599,7 @@ function aes256GcmDecryptPure(key32, iv12, combinedCtTag, aad = new Uint8Array(0
   }
 
   if (!constantTimeEqual(receivedTag, expectedTag)) {
+    roundKeys.fill(0);
     throw new Error("Authentication tag mismatch — wrong password or corrupted ciphertext");
   }
 
@@ -602,6 +614,8 @@ function aes256GcmDecryptPure(key32, iv12, combinedCtTag, aad = new Uint8Array(0
     }
     ctr = gcmInc32(ctr);
   }
+  roundKeys.fill(0);
+  keystream.fill(0);
   return pt;
 }
 
@@ -610,28 +624,35 @@ function aes256GcmDecryptPure(key32, iv12, combinedCtTag, aad = new Uint8Array(0
 // ============================================================================
 
 async function pbkdf2Derive64(password, saltBytes, iterations) {
-  const pwBytes = textEncoder.encode(password);
-  if (isNativeWebCryptoAvailable()) {
-    const baseKey = await globalThis.crypto.subtle.importKey(
-      "raw",
-      pwBytes,
-      { name: "PBKDF2" },
-      false,
-      ["deriveBits"]
-    );
-    const bits = await globalThis.crypto.subtle.deriveBits(
-      {
-        name: "PBKDF2",
-        salt: saltBytes,
-        iterations,
-        hash: "SHA-256",
-      },
-      baseKey,
-      512
-    );
-    return new Uint8Array(bits);
+  if (!Number.isInteger(iterations) || iterations < 1) {
+    throw new Error("PBKDF2 iterations must be a positive integer");
   }
-  return pbkdf2Sha256Pure(pwBytes, saltBytes, iterations, 64);
+  const pwBytes = textEncoder.encode(password);
+  try {
+    if (isNativeWebCryptoAvailable()) {
+      const baseKey = await globalThis.crypto.subtle.importKey(
+        "raw",
+        pwBytes,
+        { name: "PBKDF2" },
+        false,
+        ["deriveBits"]
+      );
+      const bits = await globalThis.crypto.subtle.deriveBits(
+        {
+          name: "PBKDF2",
+          salt: saltBytes,
+          iterations,
+          hash: "SHA-256",
+        },
+        baseKey,
+        512
+      );
+      return new Uint8Array(bits);
+    }
+    return pbkdf2Sha256Pure(pwBytes, saltBytes, iterations, 64);
+  } finally {
+    pwBytes.fill(0);
+  }
 }
 
 async function aesGcmEncryptRaw(keyBytes, ivBytes, plaintextBytes, aadBytes) {
@@ -682,8 +703,11 @@ export async function deriveAuthAndKek(password, kdfSaltB64, iterations = DEFAUL
   const derived = await pbkdf2Derive64(password, saltBytes, iterations);
   const authKeyBytes = derived.slice(0, 32);
   const kekBytes = derived.slice(32, 64);
+  const authKeyB64 = bytesToBase64(authKeyBytes);
+  derived.fill(0);
+  authKeyBytes.fill(0);
   return {
-    authKeyB64: bytesToBase64(authKeyBytes),
+    authKeyB64,
     kekBytes,
   };
 }
@@ -696,9 +720,43 @@ export function generateDek() {
   return generateRandomBytes(32);
 }
 
-export async function wrapDek(dekBytes, kekBytes) {
+/**
+ * Generates a 160-bit random recovery key formatted as 8 groups of 4 unambiguous Base32 characters.
+ */
+export function generateRecoveryKey() {
+  const bytes = generateRandomBytes(20); // 160 bits = 32 * 5 bits
+  let chars = "";
+  let bitBuf = 0;
+  let bitCount = 0;
+  for (let i = 0; i < bytes.length; i++) {
+    bitBuf = (bitBuf << 8) | bytes[i];
+    bitCount += 8;
+    while (bitCount >= 5) {
+      bitCount -= 5;
+      chars += RECOVERY_ALPHABET[(bitBuf >>> bitCount) & 31];
+    }
+  }
+  bytes.fill(0);
+  return chars.match(/.{1,4}/g).join("-");
+}
+
+export function normalizeRecoveryKey(raw) {
+  // Crockford Base32 normalization: strip separators, uppercase, map O->0 and I/L->1
+  const cleaned = String(raw || "")
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, "")
+    .replace(/O/g, "0")
+    .replace(/[IL]/g, "1");
+  if (cleaned.length !== 32) return "";
+  for (let i = 0; i < cleaned.length; i++) {
+    if (RECOVERY_ALPHABET.indexOf(cleaned[i]) === -1) return "";
+  }
+  return cleaned;
+}
+
+export async function wrapDek(dekBytes, kekBytes, aadStr = "heyjournal:dek:v1") {
   const iv = generateRandomBytes(GCM_IV_BYTES);
-  const aad = textEncoder.encode("heyjournal:dek:v1");
+  const aad = textEncoder.encode(aadStr);
   const ct = await aesGcmEncryptRaw(kekBytes, iv, dekBytes, aad);
   return JSON.stringify({
     v: 1,
@@ -708,14 +766,17 @@ export async function wrapDek(dekBytes, kekBytes) {
   });
 }
 
-export async function unwrapDek(wrappedDekJson, kekBytes) {
+export async function unwrapDek(wrappedDekJson, kekBytes, aadStr = "heyjournal:dek:v1") {
   const parsed = JSON.parse(wrappedDekJson);
   if (!parsed || parsed.v !== 1 || parsed.alg !== "A256GCM") {
     throw new Error("Unsupported vault key envelope");
   }
   const iv = base64ToBytes(parsed.iv);
   const ct = base64ToBytes(parsed.ct);
-  const aad = textEncoder.encode("heyjournal:dek:v1");
+  if (iv.length !== GCM_IV_BYTES || ct.length < GCM_TAG_BYTES) {
+    throw new Error("Invalid vault key envelope length");
+  }
+  const aad = textEncoder.encode(aadStr);
   const dek = await aesGcmDecryptRaw(kekBytes, iv, ct, aad);
   if (dek.length !== 32) {
     throw new Error("Invalid unwrapped vault key length");
@@ -743,6 +804,9 @@ export async function decryptJson(blobJson, dekBytes, aadStr = "") {
   }
   const iv = base64ToBytes(parsed.iv);
   const ct = base64ToBytes(parsed.ct);
+  if (iv.length !== GCM_IV_BYTES || ct.length < GCM_TAG_BYTES) {
+    throw new Error("Invalid encrypted payload envelope length");
+  }
   const aad = aadStr ? textEncoder.encode(aadStr) : new Uint8Array(0);
   const pt = await aesGcmDecryptRaw(dekBytes, iv, ct, aad);
   return JSON.parse(textDecoder.decode(pt));

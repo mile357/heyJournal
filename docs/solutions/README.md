@@ -7,6 +7,7 @@ Consult relevant notes before making cross-cutting changes, and add a new note w
 
 - [`zero-knowledge-dual-crypto.md`](zero-knowledge-dual-crypto.md) — Dual Web Crypto + NIST-verified pure-JS AES-256-GCM/PBKDF2 architecture for HTTPS and plain LAN HTTP.
 - [`asset-version-cache-busting.md`](asset-version-cache-busting.md) — Synchronizing `?v=N` and Service Worker cache tokens across all entry points while maintaining strict `script-src 'self'` CSP.
+- [`csp-safe-blob-exports-and-concurrency.md`](csp-safe-blob-exports-and-concurrency.md) — CSP-safe `blob:` printing, keeping PBKDF2 outside `DB_LOCK`, and 3-way vault metadata conflict merging.
 
 ---
 

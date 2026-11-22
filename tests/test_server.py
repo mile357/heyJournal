@@ -167,6 +167,93 @@ class TestDiscoveryAndSecurityHeaders(BaseServerTestCase):
         self.assertEqual(status, 403)
         self.assertIn("Cross-origin", data["error"])
 
+        # Origin: null (sandboxed iframe / file:// / data:) must also be blocked
+        st_null, _, _, _, _ = execute_request(
+            "POST",
+            "/api/auth/logout",
+            headers={"Origin": "null"},
+        )
+        self.assertEqual(st_null, 403)
+
+        # Malformed Referer without Origin must also be blocked
+        st_ref, _, _, _, _ = execute_request(
+            "POST",
+            "/api/auth/logout",
+            headers={"Referer": "https://evil.example.com/attack.html"},
+        )
+        self.assertEqual(st_ref, 403)
+
+    def test_head_health_and_no_directory_listing(self):
+        st_head, hdrs, _, body, _ = execute_request("HEAD", "/api/health")
+        self.assertEqual(st_head, 200)
+        self.assertEqual(body, b"")
+        self.assertIn("no-store", hdrs.get("cache-control", ""))
+
+        st_dir, _, _, _, _ = execute_request("GET", "/themes/")
+        self.assertEqual(st_dir, 404)
+
+    def test_blob_validation_rejects_bad_iv_and_short_ciphertext(self):
+        (_, _, sc, _, _), _ = register_user("blobcheck", "B")
+        cookie = extract_session_cookie(sc)
+
+        bad_iv = json.dumps({
+            "v": 1,
+            "alg": "A256GCM",
+            "iv": base64.b64encode(b"shortiv").decode("ascii"),
+            "ct": base64.b64encode(b"0123456789abcdef").decode("ascii"),
+        })
+        st1, _, _, _, _ = execute_request("POST", "/api/entries", cookie=cookie, body={"ciphertext": bad_iv})
+        self.assertEqual(st1, 400)
+
+        short_ct = json.dumps({
+            "v": 1,
+            "alg": "A256GCM",
+            "iv": base64.b64encode(b"123456789012").decode("ascii"),
+            "ct": base64.b64encode(b"too-short").decode("ascii"),
+        })
+        st2, _, _, _, _ = execute_request("POST", "/api/entries", cookie=cookie, body={"ciphertext": short_ct})
+        self.assertEqual(st2, 400)
+
+    def test_proxy_header_trust_and_backup_pruning_preserves_nightly(self):
+        self.assertTrue(server._is_trusted_proxy_ip("127.0.0.1"))
+        self.assertTrue(server._is_trusted_proxy_ip("172.18.0.2"))
+        self.assertTrue(server._is_trusted_proxy_ip("100.64.0.1"))
+        self.assertFalse(server._is_trusted_proxy_ip("203.0.113.42"))
+        self.assertFalse(server._is_trusted_proxy_ip("8.8.8.8"))
+
+        # Multi-hop X-Forwarded-Proto sets Secure cookie when behind trusted loopback/private proxy
+        (_, _, sc_https, _, _), _ = register_user("httpsuser", "H")
+        st_login, _, sc_login, _, _ = execute_request(
+            "POST",
+            "/api/auth/login",
+            headers={"X-Forwarded-Proto": "https, http"},
+            body={"username": "httpsuser", "authKey": base64.b64encode((b"H" * 32)).decode("ascii")},
+        )
+        self.assertEqual(st_login, 200)
+        self.assertTrue(any("Secure" in c for c in sc_login))
+
+        # Manual backups must not evict nightly backups
+        orig_ret = server.BACKUP_RETENTION_DAYS
+        try:
+            server.BACKUP_RETENTION_DAYS = 2
+            os.makedirs(server.BACKUP_DIR, exist_ok=True)
+            for name in (
+                "journal-backup-2026-11-19.db",
+                "journal-backup-2026-11-20.db",
+                "journal-backup-2026-11-21-100001.db",
+                "journal-backup-2026-11-21-100002.db",
+                "journal-backup-2026-11-21-100003.db",
+            ):
+                with open(os.path.join(server.BACKUP_DIR, name), "wb") as fh:
+                    fh.write(b"x")
+            server.prune_old_backups()
+            remaining = sorted(os.listdir(server.BACKUP_DIR))
+            self.assertIn("journal-backup-2026-11-19.db", remaining)
+            self.assertIn("journal-backup-2026-11-20.db", remaining)
+            self.assertEqual(len([f for f in remaining if "-1000" in f]), 2)
+        finally:
+            server.BACKUP_RETENTION_DAYS = orig_ret
+
 
 class TestAuthVaultAndMultiUserIsolation(BaseServerTestCase):
     def test_first_user_is_admin_and_second_user_is_standard(self):
@@ -188,7 +275,7 @@ class TestAuthVaultAndMultiUserIsolation(BaseServerTestCase):
         self.assertEqual(st_real, 200)
         self.assertEqual(st_fake1, 200)
         self.assertEqual(d_fake1["kdfSalt"], d_fake2["kdfSalt"])
-        self.assertEqual(d_fake1["kdfIterations"], 150000)
+        self.assertEqual(d_fake1["kdfIterations"], server.DEFAULT_CLIENT_KDF_ITERATIONS)
 
     def test_encrypted_entry_crud_optimistic_concurrency_and_isolation(self):
         (_, _, sc1, _, _), _ = register_user("alice", "A")
@@ -343,10 +430,180 @@ class TestAdminAccountManagementAndBackups(BaseServerTestCase):
         (st_blocked, _, _, _, _), _ = register_user("newperson", "X")
         self.assertEqual(st_blocked, 403)
 
-        # Admin triggers online encrypted SQLite backup
+        # Admin triggers online encrypted SQLite backup and downloads it
         st_bk, _, _, _, d_bk = execute_request("POST", "/api/admin/backup", cookie=cookie_admin)
         self.assertEqual(st_bk, 200)
-        self.assertTrue(os.path.isfile(os.path.join(server.BACKUP_DIR, d_bk["backupName"])))
+        bk_name = d_bk["backupName"]
+        self.assertTrue(os.path.isfile(os.path.join(server.BACKUP_DIR, bk_name)))
+
+        st_dl, dl_hdrs, _, dl_body, _ = execute_request("GET", f"/api/admin/backups/{bk_name}", cookie=cookie_admin)
+        self.assertEqual(st_dl, 200)
+        self.assertTrue(dl_body.startswith(b"SQLite format 3\x00"))
+        self.assertIn("attachment", dl_hdrs.get("content-disposition", ""))
+        self.assertIn("no-store", dl_hdrs.get("cache-control", ""))
+
+        # Path traversal on backup download rejected
+        st_trav, _, _, _, _ = execute_request("GET", "/api/admin/backups/..%2Fjournal.db", cookie=cookie_admin)
+        self.assertEqual(st_trav, 400)
+
+    def test_recovery_key_lifecycle_and_password_reset(self):
+        (_, _, sc1, _, d1), old_auth_key = register_user("recoveruser", "R")
+        old_cookie = extract_session_cookie(sc1)
+        self.assertFalse(d1["user"]["hasRecoveryKey"])
+
+        rec_auth_key = base64.b64encode(b"K" * 32).decode("ascii")
+        rec_salt = base64.b64encode(b"1122334455667788").decode("ascii")
+        rec_blob = make_fake_blob("recovery-dek")
+
+        # Set recovery key
+        st_set, _, _, _, d_set = execute_request(
+            "POST",
+            "/api/auth/recovery-key",
+            cookie=old_cookie,
+            body={
+                "recoveryAuthKey": rec_auth_key,
+                "recoveryKdfSalt": rec_salt,
+                "recoveryKdfIterations": 150000,
+                "recoveryWrappedDek": rec_blob,
+            },
+        )
+        self.assertEqual(st_set, 200)
+        self.assertTrue(d_set["user"]["hasRecoveryKey"])
+
+        # Challenge returns real salt for user and deterministic fake salt for nonexistent user
+        st_c1, _, _, _, dc1 = execute_request("POST", "/api/auth/recovery-challenge", body={"username": "recoveruser"})
+        st_c2, _, _, _, dc2 = execute_request("POST", "/api/auth/recovery-challenge", body={"username": "ghost_user"})
+        st_c3, _, _, _, dc3 = execute_request("POST", "/api/auth/recovery-challenge", body={"username": "ghost_user"})
+        self.assertEqual(st_c1, 200)
+        self.assertEqual(dc1["recoveryKdfSalt"], rec_salt)
+        self.assertEqual(st_c2, 200)
+        self.assertEqual(dc2["recoveryKdfSalt"], dc3["recoveryKdfSalt"])
+
+        # Wrong recovery key rejected; right key returns wrapped DEK
+        wrong_key = base64.b64encode(b"X" * 32).decode("ascii")
+        st_bad, _, _, _, _ = execute_request(
+            "POST", "/api/auth/recovery-verify", body={"username": "recoveruser", "recoveryAuthKey": wrong_key}
+        )
+        self.assertEqual(st_bad, 401)
+
+        st_ok, _, _, _, d_ok = execute_request(
+            "POST", "/api/auth/recovery-verify", body={"username": "recoveruser", "recoveryAuthKey": rec_auth_key}
+        )
+        self.assertEqual(st_ok, 200)
+        self.assertEqual(d_ok["recoveryWrappedDek"], rec_blob)
+
+        # Complete zero-knowledge password recovery -> rotates sessions & rejects old password
+        new_auth_key = base64.b64encode(b"Z" * 32).decode("ascii")
+        new_salt = base64.b64encode(b"8877665544332211").decode("ascii")
+        st_rec, _, sc_new, _, d_rec = execute_request(
+            "POST",
+            "/api/auth/recover",
+            body={
+                "username": "recoveruser",
+                "recoveryAuthKey": rec_auth_key,
+                "newAuthKey": new_auth_key,
+                "newKdfSalt": new_salt,
+                "newKdfIterations": 600000,
+                "newWrappedDek": make_fake_blob("rewrapped-after-rec"),
+            },
+        )
+        self.assertEqual(st_rec, 200)
+        new_cookie = extract_session_cookie(sc_new)
+        self.assertIsNotNone(new_cookie)
+
+        # Old session revoked
+        st_old_sess, _, _, _, _ = execute_request("GET", "/api/vault", cookie=old_cookie)
+        self.assertEqual(st_old_sess, 401)
+
+        # Remove recovery key
+        st_rm, _, _, _, d_rm = execute_request("DELETE", "/api/auth/recovery-key", cookie=new_cookie)
+        self.assertEqual(st_rm, 200)
+        self.assertFalse(d_rm["user"]["hasRecoveryKey"])
+
+    def test_batch_import_admin_roles_and_self_account_delete(self):
+        (_, _, sc_admin, _, d_admin), admin_key = register_user("rootadmin", "A")
+        (_, _, sc_member, _, d_member), member_key = register_user("familyuser", "M")
+        cookie_admin = extract_session_cookie(sc_admin)
+        cookie_member = extract_session_cookie(sc_member)
+
+        # Batch import 2 entries, then re-import with 1 duplicate + 1 new
+        st_b1, _, _, _, db1 = execute_request(
+            "POST",
+            "/api/entries/batch",
+            cookie=cookie_member,
+            body={
+                "entries": [
+                    {"id": "imp-entry-0001", "ciphertext": make_fake_blob("imp0001")},
+                    {"id": "imp-entry-0002", "ciphertext": make_fake_blob("imp0002")},
+                ]
+            },
+        )
+        self.assertEqual(st_b1, 201)
+        self.assertEqual(db1["importedCount"], 2)
+        self.assertEqual(db1["skippedCount"], 0)
+
+        st_b2, _, _, _, db2 = execute_request(
+            "POST",
+            "/api/entries/batch",
+            cookie=cookie_member,
+            body={
+                "entries": [
+                    {"id": "imp-entry-0002", "ciphertext": make_fake_blob("imp0002-dup")},
+                    {"id": "imp-entry-0003", "ciphertext": make_fake_blob("imp0003")},
+                ]
+            },
+        )
+        self.assertEqual(st_b2, 201)
+        self.assertEqual(db2["importedCount"], 1)
+        self.assertEqual(db2["skippedCount"], 1)
+
+        # Sole admin cannot self-delete
+        st_sole, _, _, _, _ = execute_request(
+            "DELETE", "/api/auth/account", cookie=cookie_admin, body={"currentAuthKey": admin_key}
+        )
+        self.assertEqual(st_sole, 400)
+
+        # Promote familyuser to admin, verify demote works, then standard self-delete with password check
+        st_prom, _, _, _, _ = execute_request(
+            "PUT",
+            f"/api/admin/users/{d_member['user']['id']}/role",
+            cookie=cookie_admin,
+            body={"isAdmin": True},
+        )
+        self.assertEqual(st_prom, 200)
+
+        st_dem, _, _, _, _ = execute_request(
+            "PUT",
+            f"/api/admin/users/{d_member['user']['id']}/role",
+            cookie=cookie_admin,
+            body={"isAdmin": False},
+        )
+        self.assertEqual(st_dem, 200)
+
+        # Wrong password rejected on self-delete
+        st_bad_pw, _, _, _, _ = execute_request(
+            "DELETE",
+            "/api/auth/account",
+            cookie=cookie_member,
+            body={"currentAuthKey": admin_key},
+        )
+        self.assertEqual(st_bad_pw, 403)
+
+        # Valid password deletes member account
+        st_self_ok, _, _, _, _ = execute_request(
+            "DELETE",
+            "/api/auth/account",
+            cookie=cookie_member,
+            body={"currentAuthKey": member_key},
+        )
+        self.assertEqual(st_self_ok, 200)
+        st_gone, _, _, _, _ = execute_request("GET", "/api/vault", cookie=cookie_member)
+        self.assertEqual(st_gone, 401)
+
+        # CLI promote helper works cleanly
+        (_, _, _, _, _), _ = register_user("backupadmin", "B")
+        self.assertEqual(server.cli_promote_admin("backupadmin"), 0)
+        self.assertEqual(server.cli_promote_admin("doesnotexist"), 1)
 
     def test_all_20_theme_stylesheets_serve_200_and_db_contains_no_plaintext(self):
         # Verify every discovered theme's stylesheet is actually servable via HTTP

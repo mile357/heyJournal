@@ -1,18 +1,19 @@
 /* HeyJournal Service Worker — Caches static shell only, NEVER caches /api/ responses */
-const CACHE_NAME = "heyjournal-v1";
+const CACHE_NAME = "heyjournal-v2";
 const SHELL_ASSETS = [
   "/",
   "/index.html",
-  "/styles.css?v=1",
-  "/theme-boot.js?v=1",
-  "/app.js?v=1",
-  "/crypto.js?v=1",
-  "/quiz-engine.js?v=1",
-  "/charts.js?v=1",
-  "/theme-engine.js?v=1",
-  "/export.js?v=1",
-  "/icon.svg?v=1",
-  "/manifest.json?v=1"
+  "/styles.css?v=2",
+  "/theme-boot.js?v=2",
+  "/app.js?v=2",
+  "/crypto.js?v=2",
+  "/quiz-engine.js?v=2",
+  "/charts.js?v=2",
+  "/theme-engine.js?v=2",
+  "/export.js?v=2",
+  "/print-summary.js?v=2",
+  "/icon.svg?v=2",
+  "/manifest.json?v=2"
 ];
 
 self.addEventListener("install", (event) => {

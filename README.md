@@ -16,17 +16,26 @@ Open **`http://localhost:8080`**.
 ## Core Capabilities
 
 ### 1. True Zero-Knowledge Client-Side Encryption
-- **Single-step Username + Password**: Your browser runs `PBKDF2-HMAC-SHA256` (150,000 iterations) to split your password into two independent 256-bit keys:
+- **Single-step Username + Password**: Your browser runs `PBKDF2-HMAC-SHA256` (`600,000` iterations, OWASP 2023 standard) to split your password into two independent 256-bit keys:
   1. An **Auth Key** verified by the server (re-hashed server-side with PBKDF2 + per-user salt).
   2. A **Key Encryption Key (KEK)** that **never leaves your device** and wraps/unwraps a random 256-bit Data Encryption Key (DEK).
 - **Encrypted at Rest & in Transit**: Journal text, timestamps, custom metrics, pinned layout, and per-question quiz responses are all encrypted locally with **AES-256-GCM** before leaving the browser.
-- **Password Rotation Without Re-Encryption**: Changing your password simply re-wraps your DEK locally and revokes other active sessions.
+- **Optional Printable Emergency Recovery Key**: Generate an offline 160-bit recovery key (wrapping the same DEK in a separate zero-knowledge slot) so household members can recover a forgotten password locally without ever giving the server plaintext access.
+- **Password Rotation Without Re-Encryption**: Changing your password (or recovering via recovery key) simply re-wraps your DEK locally and revokes other active sessions.
 - **Works on Both HTTPS and Plain LAN HTTP**: Automatically uses native browser **Web Crypto API** on `https://`/`localhost`, and seamlessly falls back to an audited, NIST SP 800-38D verified pure-JS **AES-256-GCM + PBKDF2-SHA256** engine on plain LAN HTTP (like `sslip.io`) with 100% identical ciphertext format.
-- **Optional Session Unlock**: Toggle **"Stay unlocked in this browser tab"** (`sessionStorage`) or lock instantly with one tap.
+- **Session Unlock & Auto-Lock**: Toggle **"Stay unlocked in this browser tab"** (`sessionStorage`), configure an optional **auto-lock inactivity timer** (`15m / 30m / 1h`) for shared household devices, or lock instantly with one tap.
+- **Two-Way Portability & Multi-Device Sync**: Export decrypted **JSON**, **CSV**, or **Printable Clinician Summaries**, import HeyJournal JSON exports back into any account (re-encrypted locally), and sync across phone and desktop automatically on tab return (or via the header sync button).
 
-### 2. Multi-User Vaults & First-User Admin
+### 2. Multi-User Vaults, Admin Controls & Server CLI
 - Open multi-user registration out of the box (each user gets an isolated encrypted vault).
-- The **first registered account** automatically becomes **Admin**, with an **Admin** tab in Settings (`•••`) to view registered usernames/entry counts, delete other accounts, toggle registration on/off, and inspect/trigger encrypted SQLite backups — with **zero ability to read other users' encrypted data**.
+- The **first registered account** automatically becomes **Admin**, with an **Admin** tab in Settings (`•••`) to view registered usernames/entry counts, promote/demote other admins, delete other accounts, toggle registration on/off, and trigger/download encrypted SQLite backups — with **zero ability to read other users' encrypted data**.
+- Standard users can delete their own account (with password confirmation) inside **Settings → Security & Export**.
+- **Server CLI Recovery** (if the original admin ever loses access):
+  ```bash
+  python3 server.py --list-users
+  python3 server.py --promote-admin <username>
+  python3 server.py --delete-user <username>
+  ```
 
 ### 3. Two Metric Types: Custom Numbers + 13 Clinical Self-Assessment Quizzes
 - **Simple Numeric Metrics**: Add anything you want (`Weight (lbs)`, `Sleep (hrs)`, `Energy (1–10)`, etc.), pin favorites directly onto the **Input** tab for 1-tap daily logging, and track trends over time.
@@ -51,6 +60,18 @@ Switch live inside **Settings (`•••`) → `appearance`** between **Metro**
 
 ---
 
+## Security Model (What's Protected & What HTTPS Adds)
+
+- **Protected by Zero-Knowledge Encryption (both HTTP and HTTPS)**:
+  - Stolen database files (`data/journal.db`), server backups (`data/backups/`), disk snapshots, and cloud backup copies contain only AES-256-GCM ciphertext.
+  - Server administrators (and anyone with shell access to the host) cannot read any user's journal entries, custom metrics, quiz responses, or recovery keys.
+  - Compromising one household account never exposes another user's vault.
+- **What HTTPS Adds (Recommended via Tailscale Serve, Cloudflare Tunnel, or Let's Encrypt)**:
+  - Over plain LAN HTTP, an active attacker on the same Wi-Fi network could theoretically tamper with served JavaScript (`app.js`/`crypto.js`) in transit or intercept the `hj_session` cookie.
+  - Serving HeyJournal over HTTPS protects JavaScript integrity in transit, marks session cookies `Secure`, and activates hardware-accelerated native Web Crypto API.
+
+---
+
 ## Testing & Deployment
 
 ```bash
@@ -58,5 +79,6 @@ Switch live inside **Settings (`•••`) → `appearance`** between **Metro**
 python3 -m unittest discover -s tests -p "test_*.py" -v
 ```
 
-- **Docker Compose**: `docker compose up -d`
-- **Coolify Home Server**: Follow **[`COOLIFY_SETUP.md`](COOLIFY_SETUP.md)**.
+- **Docker Compose**: `mkdir -p data && docker compose up -d` *(on Linux, ensure `./data` is writable by UID 1000 or use a named Docker volume)*.
+- **Coolify Home Server**: Follow **[`COOLIFY_SETUP.md`](COOLIFY_SETUP.md)** (includes persistent storage, environment variables, and SQLite backup restore steps).
+- **Backup & Restore**: Automated encrypted SQLite snapshots run daily at **3:00 AM** local time (`TZ`) into `data/backups/`. To restore, stop the server, copy a backup over `data/journal.db`, remove any `-wal`/`-shm` files, and restart.

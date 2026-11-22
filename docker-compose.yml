@@ -9,13 +9,17 @@ services:
     ports:
       - "8080:8080"
     volumes:
-      # Persists zero-knowledge encrypted SQLite DB (journal.db) and nightly 3 AM backups (data/backups/)
+      # Persists zero-knowledge encrypted SQLite DB (journal.db) and nightly 3 AM backups (data/backups/).
+      # Container runs as non-root UID 1000: on Linux, ensure `./data` is writable by UID 1000
+      # (e.g. `mkdir -p data && sudo chown -R 1000:1000 data`), or switch to a named Docker volume.
       - ./data:/app/data
       # Optional: mount a custom quizzes folder on the host to drop in new JSON quizzes without rebuilding
       # - ./quizzes:/app/quizzes:ro
     environment:
       - PORT=8080
       - TZ=America/Los_Angeles
-      # - ALLOW_SIGNUPS=1          # Set to 0 to disable new registrations (can also be toggled in Admin UI)
+      # - ALLOW_SIGNUPS=1          # Initial first-boot default (0 disables new signups; also toggleable in Admin UI)
       # - BACKUP_RETENTION_DAYS=14 # Number of nightly encrypted SQLite backups to keep
       # - SESSION_TTL_DAYS=14      # Cookie session lifetime in days
+      # - AUTH_RATE_LIMIT=30       # Max auth attempts per IP per 60 seconds
+      # - TRUST_PROXY=auto         # auto (trust private/loopback proxies), 1 (always), or 0 (never)

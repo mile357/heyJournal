@@ -143,7 +143,24 @@ class TestQuizLibraryAndScoringEngine(unittest.TestCase):
         mdqAns["q15"] = 3;
         const mdqRes = scoreQuiz(quizzes["mdq"], mdqAns);
 
-        const out = JSON.stringify({{ phqRes, pssRes, whoRes, whodasRes, dassRes, mdqRes }});
+        // 7. 1-based percentage custom quiz & empty-string safety flag guard
+        const customOneBased = {{
+          id: "custom-pct",
+          name: "Custom",
+          answerScale: [{{ label: "Low", value: 1 }}, {{ label: "Mid", value: 3 }}, {{ label: "High", value: 5 }}],
+          questions: [{{ id: "q1", text: "One" }}, {{ id: "q2", text: "Two" }}],
+          scoring: {{
+            method: "percentage",
+            min: 0,
+            max: 100,
+            severityBands: [{{ min: 0, max: 100, label: "OK", level: "low" }}],
+            safetyFlags: [{{ questionId: "q1", minValue: 0, message: "Should not fire on empty string" }}]
+          }}
+        }};
+        const customLow = scoreQuiz(customOneBased, {{ q1: 1, q2: 1 }});
+        const customEmpty = scoreQuiz(customOneBased, {{ q1: "", q2: 5 }});
+
+        const out = JSON.stringify({{ phqRes, pssRes, whoRes, whodasRes, dassRes, mdqRes, customLow, customEmpty }});
         if (typeof print === "function") print(out); else console.log(out);
         """
         out = json.loads(run_es_module(js))
@@ -169,6 +186,9 @@ class TestQuizLibraryAndScoringEngine(unittest.TestCase):
         self.assertEqual(out["mdqRes"]["score"], 13)
         self.assertTrue(out["mdqRes"]["isComplete"])
 
+        self.assertEqual(out["customLow"]["score"], 0)
+        self.assertEqual(len(out["customEmpty"]["safetyFlags"]), 0)
+
 
 class TestFrontendSyntaxAndContracts(unittest.TestCase):
     def test_all_public_js_files_have_valid_syntax(self):
@@ -184,7 +204,7 @@ class TestFrontendSyntaxAndContracts(unittest.TestCase):
                 self.assertEqual(res.returncode, 0, f"Syntax error in {fpath}: {res.stderr}")
             else:
                 rel = "./" + os.path.relpath(fpath, BASE_DIR)
-                if os.path.basename(fpath) in ("sw.js", "theme-boot.js"):
+                if os.path.basename(fpath) in ("sw.js", "theme-boot.js", "print-summary.js"):
                     # Classic script syntax check
                     with open(fpath, "r", encoding="utf-8") as fh:
                         src = fh.read()
@@ -237,12 +257,18 @@ class TestFrontendSyntaxAndContracts(unittest.TestCase):
             sw_text = fh.read()
         self.assertIn(f'CACHE_NAME = "heyjournal-v{ver}"', sw_text)
         self.assertIn('startsWith("/api/")', sw_text)
+        self.assertEqual(set(re.findall(r"\?v=(\d+)", sw_text)), {ver})
 
-        for fname in ("index.html", "theme-boot.js", "app.js", "manifest.json"):
+        for fname in ("index.html", "theme-boot.js", "app.js", "charts.js", "export.js", "manifest.json"):
             with open(os.path.join(PUBLIC_DIR, fname), "r", encoding="utf-8") as fh:
                 content = fh.read()
             found = set(re.findall(r"\?v=(\d+)", content))
             self.assertEqual(found, {ver}, f"Version mismatch in {fname}: found {found}, expected {ver}")
+
+        # Ensure clinician summary HTML contains zero inline event handlers (strict CSP)
+        with open(os.path.join(PUBLIC_DIR, "export.js"), "r", encoding="utf-8") as fh:
+            export_src = fh.read()
+        self.assertNotIn("onclick=", export_src)
 
 
 if __name__ == "__main__":

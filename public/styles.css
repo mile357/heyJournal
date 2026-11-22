@@ -1584,6 +1584,50 @@ a {
   line-height: 1.5;
 }
 
+.onboarding-cue {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 14px;
+  background: var(--bg-tile-subtle);
+  border-left: 3px solid var(--accent);
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.45;
+}
+
+.recovery-key-display {
+  font-family: var(--font-mono);
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-align: center;
+  padding: 16px 14px;
+  background: var(--bg-tile);
+  border: 2px solid var(--accent);
+  color: var(--text-primary);
+  word-break: break-all;
+  user-select: all;
+}
+
+.link-btn {
+  background: transparent;
+  border: none;
+  padding: 0;
+  color: var(--accent-text, var(--accent));
+  font-family: var(--font-body);
+  font-size: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.link-btn:hover {
+  opacity: 0.85;
+}
+
 /* ==========================================================================
    RESPONSIVE MOBILE / TABLET ADJUSTMENTS
    ========================================================================== */

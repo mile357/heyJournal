@@ -8,8 +8,8 @@ Browsers disable `window.crypto.subtle` (Web Crypto API) on non-HTTPS LAN origin
 
 ## Root Cause / Invariant
 - `crypto.getRandomValues` remains available on plain HTTP in modern browsers, while `crypto.subtle` is restricted to secure contexts (`https://`, `localhost`, `127.0.0.1`).
-- Both engines MUST share the exact same wire format (`{"v":1,"alg":"A256GCM","iv":"<b64>","ct":"<b64 ct||tag>"}`) and AAD strings (`heyjournal:dek:v1`, `heyjournal:meta:v1`, `heyjournal:entry:<id>`) so vaults created on HTTP decrypt seamlessly on HTTPS and vice versa.
-- Never send the raw password, `kekBytes`, or `dekBytes` to the server. Only the first 32 bytes of `PBKDF2-HMAC-SHA256(password, kdfSalt, iterations, 64)` (`authKey`) are transmitted for authentication, and the server re-hashes `authKey` with its own random salt.
+- Both engines MUST share the exact same wire format (`{"v":1,"alg":"A256GCM","iv":"<b64>","ct":"<b64 ct||tag>"}`) and AAD strings (`heyjournal:dek:v1`, `heyjournal:recovery-dek:v1`, `heyjournal:meta:v1`, `heyjournal:entry:<id>`) so vaults created on HTTP decrypt seamlessly on HTTPS and vice versa.
+- Never send the raw password, recovery key, `kekBytes`, or `dekBytes` to the server. Only the first 32 bytes of `PBKDF2-HMAC-SHA256(secret, kdfSalt, iterations, 64)` (`authKey` / `recoveryAuthKey`, default `600,000` iterations for passwords and `150,000` for 160-bit Crockford Base32 recovery keys) are transmitted for authentication, and the server re-hashes them with its own random salt.
 
 ## Fix / Pattern to Follow
 - Always call the high-level helpers in `public/crypto.js` (`deriveAuthAndKek`, `wrapDek`, `unwrapDek`, `encryptJson`, `decryptJson`).

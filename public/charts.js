@@ -4,7 +4,7 @@
  * so charts automatically harmonize across all 20 themes (dark & light modes).
  */
 
-import { findSeverityBand } from "./quiz-engine.js";
+import { findSeverityBand } from "./quiz-engine.js?v=2";
 
 const RANGE_DAYS_MAP = {
   "30d": 30,
@@ -245,12 +245,14 @@ export function renderMetricChart(containerEl, options) {
   )} L${coords[0].x.toFixed(1)},${(pad.top + plotH).toFixed(1)} Z`;
 
   const gradId = `cg-${Math.random().toString(36).slice(2, 9)}`;
+  const safeAccent = escapeXml(accentColor);
+  const chartSummary = `${points.length} data points from ${formatShortDate(xMin)} to ${formatShortDate(xMax)}`;
 
   const pointsSvg = coords
     .map(
       (c) => `
       <circle cx="${c.x.toFixed(1)}" cy="${c.y.toFixed(1)}" r="4"
-              class="chart-dot" style="--dot-accent:${accentColor};" data-idx="${c.idx}" />
+              class="chart-dot" style="--dot-accent:${safeAccent};" data-idx="${c.idx}" />
       <circle cx="${c.x.toFixed(1)}" cy="${c.y.toFixed(1)}" r="14"
               fill="transparent" class="chart-hit" data-idx="${c.idx}" tabindex="0"
               role="button" aria-label="${escapeXml(formatShortDate(c.pt.tsMs))}: ${escapeXml(formatNum(c.pt.value))} ${escapeXml(unit)}" />
@@ -261,17 +263,17 @@ export function renderMetricChart(containerEl, options) {
   const wrap = document.createElement("div");
   wrap.className = "chart-svg-wrap";
   wrap.innerHTML = `
-    <svg class="chart-svg" viewBox="0 0 ${width} ${height}" preserveAspectRatio="xMidYMid meet" role="img">
+    <svg class="chart-svg" viewBox="0 0 ${width} ${height}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="${escapeXml(chartSummary)}">
       <defs>
         <linearGradient id="${gradId}" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stop-color="${accentColor}" stop-opacity="0.28" />
-          <stop offset="100%" stop-color="${accentColor}" stop-opacity="0.01" />
+          <stop offset="0%" stop-color="${safeAccent}" stop-opacity="0.28" />
+          <stop offset="100%" stop-color="${safeAccent}" stop-opacity="0.01" />
         </linearGradient>
       </defs>
       ${bandsSvg}
       ${yGridSvg}
       <path d="${areaPath}" fill="url(#${gradId})" />
-      <path d="${linePath}" fill="none" stroke="${accentColor}" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round" />
+      <path d="${linePath}" fill="none" stroke="${safeAccent}" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round" />
       <line class="chart-crosshair" x1="0" y1="${pad.top}" x2="0" y2="${pad.top + plotH}" style="display:none;" />
       ${pointsSvg}
       ${xTicksSvg}
@@ -330,5 +332,8 @@ export function renderMetricChart(containerEl, options) {
   });
 
   wrap.addEventListener("mouseleave", hidePoint);
+  wrap.addEventListener("focusout", (e) => {
+    if (!wrap.contains(e.relatedTarget)) hidePoint();
+  });
   containerEl.appendChild(wrap);
 }

@@ -125,6 +125,96 @@ class TestZeroKnowledgeCryptoEngine(unittest.TestCase):
         self.assertTrue(out["tagTamperRejected"])
         self.assertTrue(out["aadTamperRejected"])
 
+    def test_envelope_validation_and_invalid_iterations_rejected(self):
+        js = """
+        import { decryptJson, _pureJs, bytesToBase64 } from "./public/crypto.js";
+        const key = new Uint8Array(32);
+
+        let badIvRejected = false;
+        try {
+          const blob = JSON.stringify({ v: 1, alg: "A256GCM", iv: bytesToBase64(new Uint8Array(8)), ct: bytesToBase64(new Uint8Array(24)) });
+          await decryptJson(blob, key);
+        } catch (e) { badIvRejected = true; }
+
+        let shortCtRejected = false;
+        try {
+          const blob = JSON.stringify({ v: 1, alg: "A256GCM", iv: bytesToBase64(new Uint8Array(12)), ct: bytesToBase64(new Uint8Array(8)) });
+          await decryptJson(blob, key);
+        } catch (e) { shortCtRejected = true; }
+
+        let badIterRejected = false;
+        try {
+          _pureJs.pbkdf2Sha256Pure(new Uint8Array(4), new Uint8Array(16), 0, 64);
+        } catch (e) { badIterRejected = true; }
+
+        const out = JSON.stringify({ badIvRejected, shortCtRejected, badIterRejected });
+        if (typeof print === "function") print(out); else console.log(out);
+        """
+        out = json.loads(run_es_module_snippet(js))
+        self.assertTrue(out["badIvRejected"])
+        self.assertTrue(out["shortCtRejected"])
+        self.assertTrue(out["badIterRejected"])
+
+    def test_recovery_key_format_normalization_and_aad_separation(self):
+        js = """
+        if (typeof globalThis.crypto === "undefined") {
+          let seed = 42;
+          globalThis.crypto = {
+            getRandomValues(arr) {
+              for (let i = 0; i < arr.length; i++) {
+                seed = (seed * 1664525 + 1013904223) >>> 0;
+                arr[i] = (seed >>> 24) & 0xff;
+              }
+              return arr;
+            },
+          };
+        }
+        import {
+          DEFAULT_KDF_ITERATIONS,
+          generateRecoveryKey,
+          normalizeRecoveryKey,
+          wrapDek,
+          unwrapDek,
+        } from "./public/crypto.js";
+
+        const keyStr = generateRecoveryKey();
+        const norm = normalizeRecoveryKey("  " + keyStr.toLowerCase() + "  ");
+        // Crockford normalization maps O->0 and I/L->1, while rejecting U and wrong lengths
+        const typoNorm = normalizeRecoveryKey("OOOO-IIII-LLLL-2222-3333-4444-5555-6666");
+        const badNorm = normalizeRecoveryKey("UUUU-2222-3333-4444-5555-6666-7777-8888");
+
+        // Verify recovery DEK wrap uses domain-separated AAD and cannot unwrap under password AAD
+        const dek = new Uint8Array(32).fill(7);
+        const recKek = new Uint8Array(32).fill(9);
+        const wrapped = await wrapDek(dek, recKek, "heyjournal:recovery-dek:v1");
+        const unwrapped = await unwrapDek(wrapped, recKek, "heyjournal:recovery-dek:v1");
+        let crossAadRejected = false;
+        try {
+          await unwrapDek(wrapped, recKek, "heyjournal:dek:v1");
+        } catch (e) {
+          crossAadRejected = true;
+        }
+
+        const out = JSON.stringify({
+          defaultIters: DEFAULT_KDF_ITERATIONS,
+          keyStr,
+          normLen: norm.length,
+          typoNorm,
+          badNorm,
+          roundTripOk: unwrapped.length === 32 && unwrapped[0] === 7 && unwrapped[31] === 7,
+          crossAadRejected,
+        });
+        if (typeof print === "function") print(out); else console.log(out);
+        """
+        out = json.loads(run_es_module_snippet(js))
+        self.assertEqual(out["defaultIters"], 600000)
+        self.assertRegex(out["keyStr"], r"^[0-9A-Z]{4}(-[0-9A-Z]{4}){7}$")
+        self.assertEqual(out["normLen"], 32)
+        self.assertEqual(out["typoNorm"], "00001111111122223333444455556666")
+        self.assertEqual(out["badNorm"], "")
+        self.assertTrue(out["roundTripOk"])
+        self.assertTrue(out["crossAadRejected"])
+
 
 if __name__ == "__main__":
     unittest.main()

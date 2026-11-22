@@ -23,6 +23,6 @@ USER journaluser
 EXPOSE 8080
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
-  CMD python3 -c 'import os, urllib.request; port = os.environ.get("PORT", "8080"); urllib.request.urlopen(f"http://127.0.0.1:{port}/api/health")' || exit 1
+  CMD python3 -c 'import os, urllib.request; port = os.environ.get("PORT", "8080"); urllib.request.urlopen(f"http://127.0.0.1:{port}/api/health", timeout=4)' || exit 1
 
 CMD ["python3", "server.py"]

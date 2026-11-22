@@ -1,6 +1,6 @@
-# Family Hub Custom Themes
+# HeyJournal Custom Themes
 
-Drop any theme folder into `public/themes/<theme-id>/` and it will be discovered automatically on server start (`GET /api/themes`) and appear in **Settings → Appearance → Theme** as well as the mobile grocery companion (`/go.html`).
+Drop any theme folder into `public/themes/<theme-id>/` and it is automatically discovered by the server (`GET /api/themes`) and appears in **Settings (`•••`) → Appearance → Theme**. Theme folders share 100% token compatibility with [Metro Family Hub](https://github.com/mile357/FamilyCoordination) themes.
 
 ---
 
@@ -104,22 +104,21 @@ Always scope your rules to your theme's `data-theme-id` attribute so other theme
 - **Typography & Casing**: `--font-display`, `--font-body`, `--font-mono`, `--title-size`, `--title-weight`, `--title-tracking`, `--title-transform`, `--slot-title-size`, `--slot-title-weight`, `--slot-title-transform`, `--card-title-weight`, `--section-transform`, `--label-transform`, `--btn-transform`, `--badge-transform`, `--clock-size`, `--clock-weight`, `--clock-transform`, `--date-size`, `--date-transform`, `--agenda-day-transform`
 - **Scrollbars**: `--scrollbar-track`, `--scrollbar-thumb`, `--scrollbar-thumb-hover`
 
-For structural chrome customization, themes can also style `.panorama-header`, `.metro-slot`, `.slot-header`, `.slot-header.double-slot-header`, `.slot-title`, `.slot-body`, `.metro-btn`, `.metro-input`, `.metro-toggle`, `.metro-checkbox`, `.metro-list-item`, `.pivot-tab`, `.metro-flyout`, `.extension-card`, and `.pocket-header` (on `/go.html`).
+For structural chrome customization, themes can also style `.panorama-header`, `.metro-slot`, `.slot-header`, `.slot-title`, `.slot-body`, `.metro-btn`, `.metro-input`, `.metro-toggle`, `.pivot-tab`, `.metro-flyout`, and `.extension-card`.
 
 ---
 
 ## Readability, Accessibility & Touchscreen Guidelines
 
-Because Family Hub runs full-bleed on a kitchen touchscreen tablet **and** on phones via `/go.html`, every theme should follow these invariants:
+Because HeyJournal is designed for fast daily journaling across phones, tablets, and desktops, every theme should follow these invariants:
 
-1. **Preserve Panorama layout flow**: Do not override core flex/scroll mechanics on `.panorama-viewport` (`overflow-x: auto; display: flex;`), `.metro-column`, `.size-full`, `.size-half`, `.size-double`, or `.slot-body` (`overflow-y: auto`).
+1. **Preserve core layout flow**: Keep `.journal-main`, `.metro-slot`, `.slot-body`, `.modal-panel`, and `.metro-flyout` responsive and scrollable across narrow mobile viewports.
 2. **Keep touchscreen hit targets intact**:
-   - Buttons (`button`, `.metro-btn`), inputs (`.metro-input`), and `.slot-header` headers should remain at least **34–40px** tall.
-   - Icon buttons (`.catalog-icon-btn`, `.slot-icon-btn`, `.metro-ellipsis-btn`) should keep at least **32x32px** hit areas.
-   - List checkboxes should stay inside `.check-row` so tapping anywhere on a grocery/chore row toggles it easily.
+   - Buttons (`button`, `.metro-btn`), inputs (`.metro-input`), quiz options (`.quiz-option-btn`), and `.slot-header` headers should remain at least **34–40px** tall.
+   - Icon buttons (`.slot-icon-btn`, `.metro-ellipsis-btn`) should keep at least **36x36px** hit areas.
 3. **Guarantee WCAG AA contrast (>= 4.5:1 for text, >= 3:1 for large headings & borders)**:
-   - Use `--accent-text`, `--slot-accent-text`, and `--ev-text-color` for colored text rather than raw `--accent` or `--slot-accent` (the host automatically adjusts lightness/darkness against your `--bg-tile`).
-   - Always use `var(--slot-accent-fg)` or an explicit high-contrast text color when setting a solid colored background (such as dark text `#000000` on yellow/peach/light cyan bars).
+   - Use `--accent-text` and `--slot-accent-text` for colored text rather than raw `--accent` (the host automatically adjusts lightness/darkness against your `--bg-tile`).
+   - Always use `var(--accent-fg)` / `var(--slot-accent-fg)` or an explicit high-contrast text color when setting a solid colored background.
    - Provide `preview.dark.tile` and `preview.light.tile` in `theme.json` so early contrast computation matches your CSS background before external stylesheets finish painting.
 4. **Never break interactive states or dialogs**:
-   - Keep `:focus-visible` outlines clear, preserve `.arrange-wireframe` overlay legibility, and do not disable `.slot-inline-drawer` visibility transitions.
+   - Keep `:focus-visible` outlines clear, preserve `.modal-backdrop.open` and `.flyout-backdrop.open` transitions, and ensure SVG chart tokens (`--border-color`, `--text-muted`, `--success-color`, `--warning-color`, `--danger-color`) stay legible.

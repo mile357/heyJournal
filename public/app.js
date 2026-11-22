@@ -5,21 +5,24 @@
 
 import {
   DEFAULT_KDF_ITERATIONS,
+  RECOVERY_KDF_ITERATIONS,
   base64ToBytes,
   bytesToBase64,
   decryptJson,
   deriveAuthAndKek,
   encryptJson,
   generateDek,
+  generateRecoveryKey,
   generateSaltB64,
   getCryptoBackendLabel,
   isNativeWebCryptoAvailable,
+  normalizeRecoveryKey,
   unwrapDek,
   wrapDek,
-} from "./crypto.js?v=1";
+} from "./crypto.js?v=2";
 
-import { findSeverityBand, formatScoreValue, getQuestionOptions, scoreQuiz } from "./quiz-engine.js?v=1";
-import { computeSeriesStats, filterPointsByRange, renderMetricChart } from "./charts.js?v=1";
+import { findSeverityBand, formatScoreValue, getQuestionOptions, scoreQuiz } from "./quiz-engine.js?v=2";
+import { computeSeriesStats, filterPointsByRange, renderMetricChart } from "./charts.js?v=2";
 import {
   ASSET_VERSION,
   ThemeRegistry,
@@ -30,8 +33,13 @@ import {
   getEffectiveThemeMode,
   getThemeAccents,
   sanitizeColor,
-} from "./theme-engine.js?v=1";
-import { downloadDecryptedCsv, downloadDecryptedJson, openPrintableClinicianSummary } from "./export.js?v=1";
+} from "./theme-engine.js?v=2";
+import {
+  downloadDecryptedCsv,
+  downloadDecryptedJson,
+  openPrintableClinicianSummary,
+  openPrintableRecoverySheet,
+} from "./export.js?v=2";
 
 const SESSION_DEK_KEY = "heyjournal_session_dek_v1";
 const STAY_UNLOCKED_PREF_KEY = "heyjournal_stay_unlocked_pref_v1";
@@ -43,6 +51,7 @@ const DEFAULT_VAULT_META = {
     theme: "dark",
     accentColor: "#00ABA9",
     themeAccents: {},
+    autoLockMinutes: 0, // 0 = off; 15 / 30 / 60 minutes
   },
   metrics: [], // [{ id, kind: "number", name, unit, pinned, createdAt }]
   pinnedQuizIds: [], // ["phq-9", "gad-7"]
@@ -64,6 +73,7 @@ const state = {
   dekBytes: null, // In-memory 32-byte AES-256 vault key (NEVER sent to server)
   stayUnlocked: false,
   vaultMeta: structuredCloneSafe(DEFAULT_VAULT_META),
+  lastSyncedVaultMeta: structuredCloneSafe(DEFAULT_VAULT_META),
   vaultMetaUpdatedAt: "",
   entries: [], // [{ id, createdAt, updatedAt, data: { timestamp, text, numericMetrics, quizResults } }]
   quizzes: [], // Auto-discovered from GET /api/quizzes
@@ -71,9 +81,15 @@ const state = {
 
   // UI state
   activeTab: "input",
-  authMode: "login", // "login" | "register" | "unlock"
+  authMode: "login", // "login" | "register" | "unlock" | "recover"
+  authUsernameDraft: "",
   authError: "",
+  autoLockReason: "",
   authBusy: false,
+  savingEntry: false,
+  syncingVault: false,
+  lastVaultSyncMs: 0,
+  lastActivityMs: Date.now(),
 
   // Input draft state (preserved across tab switches)
   draft: createFreshDraft(),
@@ -81,6 +97,7 @@ const state = {
   // Metrics tab UI
   quizCategoryFilter: "All",
   quizSearch: "",
+  editingMetricId: null,
 
   // Review tab UI
   reviewSearch: "",
@@ -95,6 +112,7 @@ const state = {
   flyoutOpen: false,
   flyoutTab: "appearance",
   adminData: null,
+  adminLoadError: "",
   modalState: null, // { type: "quiz-runner" | "quiz-breakdown", ... }
 };
 
@@ -106,6 +124,7 @@ function createFreshDraft() {
   return {
     editingEntryId: null,
     editingUpdatedAt: "",
+    conflictNotice: "",
     timestampLocal: toLocalDateTimeInputValue(new Date()),
     timestampManuallyEdited: false,
     showTimestampEditor: false,
@@ -115,6 +134,19 @@ function createFreshDraft() {
     quizResults: [], // array of scoreQuiz() outputs attached to this entry
     showPicker: false,
   };
+}
+
+function hasUnsavedDraft(d = state.draft) {
+  if (!d) return false;
+  if ((d.text || "").trim().length > 0) return true;
+  if (d.extraNumerics && d.extraNumerics.length > 0) return true;
+  if (d.quizResults && d.quizResults.length > 0) return true;
+  return Object.values(d.numericValues || {}).some((v) => String(v ?? "").trim() !== "");
+}
+
+function safeExternalUrl(rawUrl) {
+  const s = String(rawUrl || "").trim();
+  return /^https?:\/\/\S+$/i.test(s) ? s : "";
 }
 
 function escapeHtml(str) {
@@ -221,12 +253,21 @@ async function apiFetch(url, options = {}) {
   if (opts.body && typeof opts.body !== "string") {
     opts.body = JSON.stringify(opts.body);
   }
-  const res = await fetch(url, opts);
-  let data = null;
   try {
-    data = await res.json();
-  } catch (e) {}
-  return { ok: res.ok, status: res.status, data };
+    const res = await fetch(url, opts);
+    let data = null;
+    try {
+      data = await res.json();
+    } catch (e) {}
+    return { ok: res.ok, status: res.status, data };
+  } catch (err) {
+    return {
+      ok: false,
+      status: 0,
+      networkError: true,
+      data: { error: "Unable to reach server. Check your network connection." },
+    };
+  }
 }
 
 // ============================================================================
@@ -262,6 +303,9 @@ function tryRestoreSessionDek(userId) {
 }
 
 function clearSessionDek() {
+  if (state.dekBytes instanceof Uint8Array) {
+    state.dekBytes.fill(0);
+  }
   state.dekBytes = null;
   try {
     sessionStorage.removeItem(SESSION_DEK_KEY);
@@ -325,6 +369,7 @@ async function loadAndDecryptVault() {
   state.authStatus.user = res.data.user;
   state.vaultMetaUpdatedAt = res.data.vaultMetaUpdatedAt || "";
 
+  let metaFailed = false;
   if (res.data.vaultMeta) {
     try {
       const decryptedMeta = await decryptJson(res.data.vaultMeta, state.dekBytes, "heyjournal:meta:v1");
@@ -332,12 +377,15 @@ async function loadAndDecryptVault() {
     } catch (e) {
       console.error("Failed to decrypt vault metadata:", e);
       state.vaultMeta = structuredCloneSafe(DEFAULT_VAULT_META);
+      metaFailed = true;
     }
   } else {
     state.vaultMeta = structuredCloneSafe(DEFAULT_VAULT_META);
   }
+  state.lastSyncedVaultMeta = structuredCloneSafe(state.vaultMeta);
 
   const decryptedEntries = [];
+  let failedEntries = 0;
   for (const row of res.data.entries || []) {
     try {
       const data = await decryptJson(row.ciphertext, state.dekBytes, `heyjournal:entry:${row.id}`);
@@ -348,6 +396,7 @@ async function loadAndDecryptVault() {
         data: normalizeEntryData(data, row.createdAt),
       });
     } catch (e) {
+      failedEntries++;
       console.error(`Failed to decrypt entry ${row.id}:`, e);
     }
   }
@@ -356,8 +405,15 @@ async function loadAndDecryptVault() {
     (a, b) => new Date(b.data.timestamp).getTime() - new Date(a.data.timestamp).getTime()
   );
   state.entries = decryptedEntries;
+  state.lastVaultSyncMs = Date.now();
 
   applyUserThemeAndTitle();
+  if (metaFailed || failedEntries > 0) {
+    const parts = [];
+    if (metaFailed) parts.push("settings");
+    if (failedEntries > 0) parts.push(`${failedEntries} ${failedEntries === 1 ? "entry" : "entries"}`);
+    showToast(`Warning: could not decrypt ${parts.join(" and ")}.`, 5000);
+  }
   return true;
 }
 
@@ -368,6 +424,60 @@ function normalizeEntryData(raw, fallbackIso) {
     numericMetrics: Array.isArray(raw && raw.numericMetrics) ? raw.numericMetrics : [],
     quizResults: Array.isArray(raw && raw.quizResults) ? raw.quizResults : [],
   };
+}
+
+/**
+ * 3-way merges local vault metadata edits onto fresher remote metadata so
+ * concurrent metric/pin/theme changes on two devices do not clobber each other.
+ */
+function mergeVaultMetaThreeWay(base, local, remote) {
+  const merged = structuredCloneSafe(remote);
+
+  // Merge top-level settings keys that actually changed locally
+  for (const key of ["journalName", "themeId", "theme", "accentColor", "autoLockMinutes"]) {
+    if (local.settings[key] !== base.settings[key]) {
+      merged.settings[key] = local.settings[key];
+    }
+  }
+  merged.settings.themeAccents = {
+    ...(remote.settings.themeAccents || {}),
+    ...(local.settings.themeAccents || {}),
+  };
+
+  // Merge numeric metrics: preserve remote additions, apply local additions/edits/removals
+  const baseById = new Map((base.metrics || []).map((m) => [m.id, m]));
+  const localById = new Map((local.metrics || []).map((m) => [m.id, m]));
+  const mergedMetrics = [];
+  const seenIds = new Set();
+
+  for (const rm of remote.metrics || []) {
+    const bm = baseById.get(rm.id);
+    const lm = localById.get(rm.id);
+    if (bm && !lm) continue; // Explicitly deleted locally
+    if (lm && (!bm || JSON.stringify(lm) !== JSON.stringify(bm))) {
+      mergedMetrics.push(structuredCloneSafe(lm));
+    } else {
+      mergedMetrics.push(structuredCloneSafe(rm));
+    }
+    seenIds.add(rm.id);
+  }
+  for (const lm of local.metrics || []) {
+    if (!seenIds.has(lm.id)) {
+      mergedMetrics.push(structuredCloneSafe(lm));
+    }
+  }
+  merged.metrics = mergedMetrics;
+
+  // Merge pinned quiz IDs as a 3-way set diff
+  const basePinned = new Set(base.pinnedQuizIds || []);
+  const localPinned = new Set(local.pinnedQuizIds || []);
+  const mergedPinned = (remote.pinnedQuizIds || []).filter((id) => !(basePinned.has(id) && !localPinned.has(id)));
+  for (const id of local.pinnedQuizIds || []) {
+    if (!mergedPinned.includes(id)) mergedPinned.push(id);
+  }
+  merged.pinnedQuizIds = mergedPinned;
+
+  return normalizeVaultMeta(merged);
 }
 
 async function saveVaultMeta(toastMsg = "") {
@@ -381,17 +491,29 @@ async function saveVaultMeta(toastMsg = "") {
     },
   });
   if (res.status === 409 && res.data && res.data.vaultMetaUpdatedAt) {
-    // Re-sync updatedAt and retry once
+    // Decrypt remote metadata and 3-way merge before retrying once
     state.vaultMetaUpdatedAt = res.data.vaultMetaUpdatedAt;
+    if (res.data.vaultMeta) {
+      try {
+        const remoteMeta = normalizeVaultMeta(
+          await decryptJson(res.data.vaultMeta, state.dekBytes, "heyjournal:meta:v1")
+        );
+        state.vaultMeta = mergeVaultMetaThreeWay(state.lastSyncedVaultMeta, state.vaultMeta, remoteMeta);
+      } catch (e) {
+        console.error("Failed to merge remote vault metadata:", e);
+      }
+    }
+    const mergedEncrypted = await encryptJson(state.vaultMeta, state.dekBytes, "heyjournal:meta:v1");
     const retry = await apiFetch("/api/vault/meta", {
       method: "PUT",
       body: {
-        vaultMeta: encrypted,
+        vaultMeta: mergedEncrypted,
         expectedUpdatedAt: state.vaultMetaUpdatedAt,
       },
     });
     if (retry.ok) {
       state.vaultMetaUpdatedAt = retry.data.vaultMetaUpdatedAt || state.vaultMetaUpdatedAt;
+      state.lastSyncedVaultMeta = structuredCloneSafe(state.vaultMeta);
       if (toastMsg) showToast(toastMsg);
       return true;
     }
@@ -400,6 +522,7 @@ async function saveVaultMeta(toastMsg = "") {
   }
   if (res.ok) {
     state.vaultMetaUpdatedAt = res.data.vaultMetaUpdatedAt || state.vaultMetaUpdatedAt;
+    state.lastSyncedVaultMeta = structuredCloneSafe(state.vaultMeta);
     if (toastMsg) showToast(toastMsg);
     return true;
   }
@@ -423,6 +546,7 @@ function renderShell() {
   const authScreen = document.getElementById("authScreen");
   const appShell = document.getElementById("appShell");
   const userPill = document.getElementById("headerUserPill");
+  const syncBtn = document.getElementById("btnSyncVault");
   const lockBtn = document.getElementById("btnLockVault");
   const subtitle = document.getElementById("headerSubtitle");
 
@@ -431,6 +555,7 @@ function renderShell() {
     appShell.classList.remove("hidden");
     userPill.classList.remove("hidden");
     userPill.textContent = state.authStatus.user.username + (state.authStatus.user.isAdmin ? " · admin" : "");
+    syncBtn?.classList.remove("hidden");
     lockBtn.classList.remove("hidden");
     if (subtitle) {
       const cnt = state.entries.length;
@@ -441,6 +566,7 @@ function renderShell() {
     authScreen.classList.remove("hidden");
     appShell.classList.add("hidden");
     userPill.classList.add("hidden");
+    syncBtn?.classList.add("hidden");
     lockBtn.classList.add("hidden");
     if (subtitle) {
       subtitle.textContent = "zero-knowledge encrypted journal";
@@ -454,7 +580,7 @@ function renderShell() {
 }
 
 // ============================================================================
-// AUTH / UNLOCK SCREEN
+// AUTH / UNLOCK / RECOVERY SCREEN
 // ============================================================================
 function renderAuthCard() {
   const card = document.getElementById("authCard");
@@ -463,7 +589,7 @@ function renderAuthCard() {
   const isFirstUser = state.authStatus.userCount === 0;
   const hasSessionPendingUnlock = Boolean(state.authStatus.authenticated && state.authStatus.user && !state.dekBytes);
 
-  if (hasSessionPendingUnlock) {
+  if (hasSessionPendingUnlock && state.authMode !== "recover") {
     state.authMode = "unlock";
   } else if (isFirstUser) {
     state.authMode = "register";
@@ -478,6 +604,9 @@ function renderAuthCard() {
     : "";
 
   const errHtml = state.authError ? `<div class="auth-error">${escapeHtml(state.authError)}</div>` : "";
+  const autoLockHtml = state.autoLockReason
+    ? `<div class="auth-notice">${escapeHtml(state.autoLockReason)}</div>`
+    : "";
 
   if (state.authMode === "unlock") {
     const uname = state.authStatus.user.username;
@@ -489,6 +618,7 @@ function renderAuthCard() {
         <p class="auth-lead">
           Welcome back, <strong>${escapeHtml(uname)}</strong>. Enter your password to decrypt your journal locally on this device.
         </p>
+        ${autoLockHtml}
         ${httpWarning}
         ${errHtml}
         <form id="authForm">
@@ -506,16 +636,92 @@ function renderAuthCard() {
             </button>
             <button class="metro-btn subtle" type="button" id="btnSwitchAccount">switch account</button>
           </div>
+          ${
+            state.authStatus.user.hasRecoveryKey
+              ? `<div style="margin-top:12px; font-size:12px; color:var(--text-secondary);">
+                   Forgot your password? <button type="button" class="link-btn" id="btnGoRecover">use recovery key</button>
+                 </div>`
+              : ""
+          }
         </form>
       </div>
     `;
 
     card.querySelector("#btnSwitchAccount").addEventListener("click", handleLockOrLogout);
+    card.querySelector("#btnGoRecover")?.addEventListener("click", () => {
+      state.authError = "";
+      state.authUsernameDraft = uname;
+      state.authMode = "recover";
+      renderAuthCard();
+    });
     card.querySelector("#authForm").addEventListener("submit", async (e) => {
       e.preventDefault();
       const pw = card.querySelector("#authPassword").value;
       const stay = card.querySelector("#chkStayUnlocked").checked;
       await handleUnlockExistingSession(pw, stay);
+    });
+    return;
+  }
+
+  if (state.authMode === "recover") {
+    card.innerHTML = `
+      <div class="slot-header">
+        <div class="slot-title-group"><h2 class="slot-title">recover vault</h2></div>
+      </div>
+      <div class="slot-body">
+        <p class="auth-lead">
+          Enter your username and 32-character emergency recovery key to decrypt your vault locally and set a new password.
+        </p>
+        ${httpWarning}
+        ${errHtml}
+        <form id="recoverForm">
+          <div class="field-group">
+            <label class="field-label" for="recUsername">username</label>
+            <input class="metro-input" id="recUsername" type="text" autocomplete="username" required
+                   value="${escapeHtml(state.authUsernameDraft)}" autofocus />
+          </div>
+          <div class="field-group">
+            <label class="field-label" for="recKey">emergency recovery key</label>
+            <input class="metro-input" id="recKey" type="text" autocomplete="off" spellcheck="false" required
+                   placeholder="XXXX-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX" style="font-family:var(--font-mono);" />
+          </div>
+          <div class="field-group">
+            <label class="field-label" for="recNewPassword">new password</label>
+            <input class="metro-input" id="recNewPassword" type="password" autocomplete="new-password" required
+                   placeholder="at least 8 characters" />
+          </div>
+          <div class="field-group">
+            <label class="field-label" for="recConfirmPassword">confirm new password</label>
+            <input class="metro-input" id="recConfirmPassword" type="password" autocomplete="new-password" required />
+          </div>
+          <label class="checkbox-row">
+            <input type="checkbox" id="chkStayUnlocked" ${state.stayUnlocked ? "checked" : ""} />
+            <span>Stay unlocked in this browser tab until closed</span>
+          </label>
+          <div class="auth-actions">
+            <button class="metro-btn accent" type="submit" ${state.authBusy ? "disabled" : ""}>
+              ${state.authBusy ? "recovering vault..." : "reset password & unlock"}
+            </button>
+            <button class="metro-btn subtle" type="button" id="btnBackToLogin">back</button>
+          </div>
+        </form>
+      </div>
+    `;
+
+    card.querySelector("#btnBackToLogin").addEventListener("click", () => {
+      state.authError = "";
+      state.authMode = hasSessionPendingUnlock ? "unlock" : "login";
+      renderAuthCard();
+    });
+    card.querySelector("#recoverForm").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const username = card.querySelector("#recUsername").value.trim();
+      state.authUsernameDraft = username;
+      const recKey = card.querySelector("#recKey").value;
+      const newPw = card.querySelector("#recNewPassword").value;
+      const confirmPw = card.querySelector("#recConfirmPassword").value;
+      const stay = card.querySelector("#chkStayUnlocked").checked;
+      await handleRecoverPassword(username, recKey, newPw, confirmPw, stay);
     });
     return;
   }
@@ -558,7 +764,7 @@ function renderAuthCard() {
         <div class="field-group">
           <label class="field-label" for="authUsername">username</label>
           <input class="metro-input" id="authUsername" type="text" autocomplete="username" required
-                 placeholder="e.g. josh" autofocus />
+                 placeholder="e.g. josh" value="${escapeHtml(state.authUsernameDraft)}" autofocus />
         </div>
         <div class="field-group">
           <label class="field-label" for="authPassword">password</label>
@@ -585,6 +791,13 @@ function renderAuthCard() {
             ${state.authBusy ? (isReg ? "creating encrypted vault..." : "unlocking...") : isReg ? "create encrypted vault" : "sign in"}
           </button>
         </div>
+        ${
+          !isReg && !isFirstUser
+            ? `<div style="margin-top:12px; font-size:12px; color:var(--text-secondary);">
+                 Forgot your password? <button type="button" class="link-btn" id="btnGoRecoverLogin">use recovery key</button>
+               </div>`
+            : ""
+        }
       </form>
     </div>
   `;
@@ -597,9 +810,18 @@ function renderAuthCard() {
     });
   });
 
+  card.querySelector("#btnGoRecoverLogin")?.addEventListener("click", () => {
+    state.authError = "";
+    const curUser = card.querySelector("#authUsername")?.value.trim();
+    if (curUser) state.authUsernameDraft = curUser;
+    state.authMode = "recover";
+    renderAuthCard();
+  });
+
   card.querySelector("#authForm").addEventListener("submit", async (e) => {
     e.preventDefault();
     const username = card.querySelector("#authUsername").value.trim();
+    state.authUsernameDraft = username;
     const password = card.querySelector("#authPassword").value;
     const stay = card.querySelector("#chkStayUnlocked").checked;
     if (isReg) {
@@ -633,10 +855,13 @@ async function handleRegister(username, password, confirmPw, stayUnlocked) {
     const { authKeyB64, kekBytes } = await deriveAuthAndKek(password, kdfSalt, kdfIterations);
     const dekBytes = generateDek();
     const wrappedDek = await wrapDek(dekBytes, kekBytes);
+    kekBytes.fill(0);
 
-    // Carry over any theme picked on the login screen into the new encrypted vault!
+    // Carry over only the visual theme/mode/accent picked on the login screen
     const initialMeta = structuredCloneSafe(DEFAULT_VAULT_META);
-    initialMeta.settings = { ...state.vaultMeta.settings };
+    initialMeta.settings.themeId = state.vaultMeta.settings.themeId || "metro";
+    initialMeta.settings.theme = state.vaultMeta.settings.theme || "dark";
+    initialMeta.settings.accentColor = state.vaultMeta.settings.accentColor || "#00ABA9";
     const encryptedMeta = await encryptJson(initialMeta, dekBytes, "heyjournal:meta:v1");
 
     const res = await apiFetch("/api/auth/register", {
@@ -652,6 +877,7 @@ async function handleRegister(username, password, confirmPw, stayUnlocked) {
     });
 
     if (!res.ok) {
+      dekBytes.fill(0);
       state.authError = (res.data && res.data.error) || "Registration failed.";
       state.authBusy = false;
       renderAuthCard();
@@ -661,13 +887,23 @@ async function handleRegister(username, password, confirmPw, stayUnlocked) {
     state.authStatus.authenticated = true;
     state.authStatus.user = res.data.user;
     state.authStatus.userCount = Math.max(1, state.authStatus.userCount + 1);
+    state.authUsernameDraft = "";
     state.dekBytes = dekBytes;
+    state.autoLockReason = "";
+    state.lastActivityMs = Date.now();
     saveStayUnlockedPref(stayUnlocked);
     state.authBusy = false;
-    await loadAndDecryptVault();
+    const loaded = await loadAndDecryptVault();
     state.draft = createFreshDraft();
     renderShell();
-    showToast(res.data.user.isAdmin ? "Encrypted admin vault created" : "Encrypted vault created");
+    if (loaded) {
+      showToast(res.data.user.isAdmin ? "Encrypted admin vault created" : "Encrypted vault created");
+      // Offer optional zero-knowledge printable recovery key setup once after signup
+      state.modalState = { type: "recovery-prompt" };
+      renderModal();
+    } else {
+      showToast("Vault created, but could not load data — please reload.");
+    }
   } catch (err) {
     console.error(err);
     state.authError = err.message || "Encryption error during registration.";
@@ -707,6 +943,7 @@ async function handleLogin(username, password, stayUnlocked) {
       body: { username, authKey: authKeyB64 },
     });
     if (!res.ok) {
+      kekBytes.fill(0);
       state.authError = (res.data && res.data.error) || "Invalid username or password.";
       state.authBusy = false;
       renderAuthCard();
@@ -714,15 +951,23 @@ async function handleLogin(username, password, stayUnlocked) {
     }
 
     const dekBytes = await unwrapDek(res.data.user.wrappedDek, kekBytes);
+    kekBytes.fill(0);
     state.authStatus.authenticated = true;
     state.authStatus.user = res.data.user;
+    state.authUsernameDraft = "";
     state.dekBytes = dekBytes;
+    state.autoLockReason = "";
+    state.lastActivityMs = Date.now();
     saveStayUnlockedPref(stayUnlocked);
     state.authBusy = false;
-    await loadAndDecryptVault();
+    const loaded = await loadAndDecryptVault();
     state.draft = createFreshDraft();
     renderShell();
-    showToast("Vault unlocked");
+    if (loaded) {
+      showToast("Vault unlocked");
+    } else {
+      showToast("Signed in, but could not load vault — please retry.");
+    }
   } catch (err) {
     console.error(err);
     state.authError = "Incorrect password or unable to decrypt vault key.";
@@ -746,13 +991,20 @@ async function handleUnlockExistingSession(password, stayUnlocked) {
   try {
     const { kekBytes } = await deriveAuthAndKek(password, user.kdfSalt, user.kdfIterations);
     const dekBytes = await unwrapDek(user.wrappedDek, kekBytes);
+    kekBytes.fill(0);
     state.dekBytes = dekBytes;
+    state.autoLockReason = "";
+    state.lastActivityMs = Date.now();
     saveStayUnlockedPref(stayUnlocked);
     state.authBusy = false;
-    await loadAndDecryptVault();
+    const loaded = await loadAndDecryptVault();
     state.draft = createFreshDraft();
     renderShell();
-    showToast("Vault unlocked");
+    if (loaded) {
+      showToast("Vault unlocked");
+    } else if (state.authStatus.authenticated) {
+      showToast("Unlocked key, but could not load vault from server.");
+    }
   } catch (err) {
     state.authError = "Incorrect password.";
     state.authBusy = false;
@@ -760,13 +1012,154 @@ async function handleUnlockExistingSession(password, stayUnlocked) {
   }
 }
 
-async function handleLockOrLogout() {
+async function handleRecoverPassword(username, rawRecoveryKey, newPassword, confirmPw, stayUnlocked) {
+  state.authError = "";
+  const normalizedKey = normalizeRecoveryKey(rawRecoveryKey);
+  if (!username || !normalizedKey) {
+    state.authError = "Enter your username and a valid 32-character recovery key.";
+    renderAuthCard();
+    return;
+  }
+  if (newPassword.length < 8) {
+    state.authError = "Please choose a new password of at least 8 characters.";
+    renderAuthCard();
+    return;
+  }
+  if (newPassword !== confirmPw) {
+    state.authError = "New passwords do not match.";
+    renderAuthCard();
+    return;
+  }
+
+  state.authBusy = true;
+  renderAuthCard();
+
+  try {
+    const chal = await apiFetch("/api/auth/recovery-challenge", {
+      method: "POST",
+      body: { username },
+    });
+    if (!chal.ok) {
+      state.authError = (chal.data && chal.data.error) || "Unable to reach server.";
+      state.authBusy = false;
+      renderAuthCard();
+      return;
+    }
+
+    const recDerived = await deriveAuthAndKek(
+      normalizedKey,
+      chal.data.recoveryKdfSalt,
+      chal.data.recoveryKdfIterations
+    );
+
+    const ver = await apiFetch("/api/auth/recovery-verify", {
+      method: "POST",
+      body: { username, recoveryAuthKey: recDerived.authKeyB64 },
+    });
+    if (!ver.ok) {
+      recDerived.kekBytes.fill(0);
+      state.authError = (ver.data && ver.data.error) || "Invalid username or recovery key.";
+      state.authBusy = false;
+      renderAuthCard();
+      return;
+    }
+
+    const dekBytes = await unwrapDek(
+      ver.data.recoveryWrappedDek,
+      recDerived.kekBytes,
+      "heyjournal:recovery-dek:v1"
+    );
+    recDerived.kekBytes.fill(0);
+
+    const newSalt = generateSaltB64();
+    const newDerived = await deriveAuthAndKek(newPassword, newSalt, DEFAULT_KDF_ITERATIONS);
+    const newWrappedDek = await wrapDek(dekBytes, newDerived.kekBytes);
+    newDerived.kekBytes.fill(0);
+
+    const res = await apiFetch("/api/auth/recover", {
+      method: "POST",
+      body: {
+        username,
+        recoveryAuthKey: recDerived.authKeyB64,
+        newAuthKey: newDerived.authKeyB64,
+        newKdfSalt: newSalt,
+        newKdfIterations: DEFAULT_KDF_ITERATIONS,
+        newWrappedDek,
+      },
+    });
+    if (!res.ok) {
+      dekBytes.fill(0);
+      state.authError = (res.data && res.data.error) || "Could not complete password reset.";
+      state.authBusy = false;
+      renderAuthCard();
+      return;
+    }
+
+    state.authStatus.authenticated = true;
+    state.authStatus.user = res.data.user;
+    state.authUsernameDraft = "";
+    state.autoLockReason = "";
+    state.lastActivityMs = Date.now();
+    state.dekBytes = dekBytes;
+    saveStayUnlockedPref(stayUnlocked);
+    state.authBusy = false;
+    const loaded = await loadAndDecryptVault();
+    state.draft = createFreshDraft();
+    renderShell();
+    if (loaded) {
+      showToast("Password reset & vault unlocked", 4000);
+    } else {
+      showToast("Password reset, but could not load vault — please reload.");
+    }
+  } catch (err) {
+    console.error(err);
+    state.authError = "Invalid recovery key or unable to decrypt vault.";
+    state.authBusy = false;
+    renderAuthCard();
+  }
+}
+
+function _wipeDecryptedMemoryState() {
   clearSessionDek();
+  const preservedTheme = {
+    themeId: state.vaultMeta.settings.themeId || "metro",
+    theme: state.vaultMeta.settings.theme || "dark",
+    accentColor: state.vaultMeta.settings.accentColor || "#00ABA9",
+  };
+  state.vaultMeta = structuredCloneSafe(DEFAULT_VAULT_META);
+  state.vaultMeta.settings.themeId = preservedTheme.themeId;
+  state.vaultMeta.settings.theme = preservedTheme.theme;
+  state.vaultMeta.settings.accentColor = preservedTheme.accentColor;
+  state.lastSyncedVaultMeta = structuredCloneSafe(state.vaultMeta);
+  state.vaultMetaUpdatedAt = "";
   state.entries = [];
   state.draft = createFreshDraft();
+  state.reviewSearch = "";
+  state.reviewMetricFilter = "all";
+  state.quizSearch = "";
+  state.editingMetricId = null;
+  state.openEntryMenuId = null;
   state.adminData = null;
-  state.flyoutOpen = false;
-  document.getElementById("flyoutBackdrop")?.classList.remove("open");
+  state.adminLoadError = "";
+  closeModal();
+  closeFlyout();
+  applyUserThemeAndTitle();
+}
+
+function lockVaultLocally(reason = "") {
+  if (!state.dekBytes) return;
+  _wipeDecryptedMemoryState();
+  state.autoLockReason = reason;
+  state.authMode = "unlock";
+  state.authError = "";
+  renderShell();
+}
+
+async function handleLockOrLogout() {
+  _wipeDecryptedMemoryState();
+  state.authUsernameDraft = "";
+  state.autoLockReason = "";
+
   await apiFetch("/api/auth/logout", { method: "POST" });
   const statusRes = await apiFetch("/api/auth/status");
   if (statusRes.ok) {
@@ -779,6 +1172,82 @@ async function handleLockOrLogout() {
   state.authError = "";
   renderShell();
   showToast("Vault locked");
+}
+
+function checkAutoLock() {
+  if (!state.authStatus.authenticated || !state.dekBytes) return;
+  const mins = Number(state.vaultMeta.settings?.autoLockMinutes || 0);
+  if (!Number.isFinite(mins) || mins <= 0) return;
+  const elapsedMs = Date.now() - state.lastActivityMs;
+  if (elapsedMs >= mins * 60 * 1000) {
+    lockVaultLocally(`Auto-locked after ${mins} minutes of inactivity.`);
+  }
+}
+
+async function syncVaultInBackground({ manual = false } = {}) {
+  if (!state.authStatus.authenticated || !state.dekBytes || state.syncingVault || state.savingEntry) {
+    return;
+  }
+  state.syncingVault = true;
+  const syncBtn = document.getElementById("btnSyncVault");
+  if (syncBtn) syncBtn.disabled = true;
+  try {
+    const ok = await loadAndDecryptVault();
+    if (ok) {
+      const subtitle = document.getElementById("headerSubtitle");
+      if (subtitle) {
+        const cnt = state.entries.length;
+        subtitle.textContent = `${cnt} ${cnt === 1 ? "entry" : "entries"} · encrypted`;
+      }
+      // Preserve active Input draft uninterrupted; refresh Review/Report/Metrics live
+      if (state.activeTab !== "input") {
+        renderActiveTab();
+      }
+      if (manual) showToast("Vault synced");
+    } else if (manual) {
+      showToast("Could not sync with server");
+    }
+  } finally {
+    state.syncingVault = false;
+    if (syncBtn) syncBtn.disabled = false;
+  }
+}
+
+async function handleGenerateRecoveryKey() {
+  if (!state.dekBytes || !state.authStatus.user) return;
+  try {
+    const recoveryKey = generateRecoveryKey();
+    const normalized = normalizeRecoveryKey(recoveryKey);
+    const recSalt = generateSaltB64();
+    const recDerived = await deriveAuthAndKek(normalized, recSalt, RECOVERY_KDF_ITERATIONS);
+    const recWrappedDek = await wrapDek(state.dekBytes, recDerived.kekBytes, "heyjournal:recovery-dek:v1");
+    recDerived.kekBytes.fill(0);
+
+    const res = await apiFetch("/api/auth/recovery-key", {
+      method: "POST",
+      body: {
+        recoveryAuthKey: recDerived.authKeyB64,
+        recoveryKdfSalt: recSalt,
+        recoveryKdfIterations: RECOVERY_KDF_ITERATIONS,
+        recoveryWrappedDek: recWrappedDek,
+      },
+    });
+    if (!res.ok) {
+      showToast((res.data && res.data.error) || "Could not save recovery key");
+      return;
+    }
+    state.authStatus.user = res.data.user;
+    if (state.flyoutOpen) renderFlyout();
+    state.modalState = {
+      type: "recovery-key",
+      recoveryKey,
+      username: state.authStatus.user.username,
+    };
+    renderModal();
+  } catch (err) {
+    console.error(err);
+    showToast("Encryption error generating recovery key");
+  }
 }
 
 // ============================================================================
@@ -956,6 +1425,16 @@ function renderInputTab(stage) {
             `
             : ""
         }
+        ${
+          d.conflictNotice
+            ? `
+              <div class="auth-error" style="display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; margin-bottom:4px;">
+                <span>${escapeHtml(d.conflictNotice)}</span>
+                <button type="button" class="metro-btn subtle compact" id="btnReloadConflict">load latest</button>
+              </div>
+            `
+            : ""
+        }
 
         <div class="timestamp-bar" style="margin-bottom:0;">
           ${
@@ -977,6 +1456,20 @@ function renderInputTab(stage) {
         </div>
 
         <textarea class="metro-textarea" id="entryTextInput" placeholder="what's on your mind?">${escapeHtml(d.text)}</textarea>
+
+        ${
+          !d.editingEntryId &&
+          state.entries.length === 0 &&
+          state.vaultMeta.metrics.length === 0 &&
+          state.vaultMeta.pinnedQuizIds.length === 0
+            ? `
+              <div class="onboarding-cue">
+                <span>Tip: Pin daily numbers (like Sleep or Mood) or clinical check-ins from <strong>metrics</strong> to appear right here for one-tap logging.</span>
+                <button type="button" class="metro-btn subtle compact" id="btnOnboardingMetrics">browse metrics →</button>
+              </div>
+            `
+            : ""
+        }
 
         ${pinnedSectionHtml}
 
@@ -1039,6 +1532,10 @@ function renderInputTab(stage) {
   stage.querySelector("#btnTogglePicker")?.addEventListener("click", () => {
     state.draft.showPicker = !state.draft.showPicker;
     renderInputTab(stage);
+  });
+
+  stage.querySelector("#btnOnboardingMetrics")?.addEventListener("click", () => {
+    setActiveTab("metrics");
   });
 
   stage.querySelectorAll("[data-pinned-num]").forEach((inp) => {
@@ -1133,6 +1630,26 @@ function renderInputTab(stage) {
         showToast("Enter a metric name");
         return;
       }
+      const existingMetric = state.vaultMeta.metrics.find(
+        (m) => m.name.toLowerCase() === name.toLowerCase()
+      );
+      if (existingMetric) {
+        if (rawVal !== "" && Number.isFinite(parseFloat(rawVal))) {
+          if (existingMetric.pinned) {
+            state.draft.numericValues[existingMetric.id] = rawVal;
+          } else {
+            const num = parseFloat(rawVal);
+            const idx = state.draft.extraNumerics.findIndex((x) => x.metricId === existingMetric.id);
+            const item = { metricId: existingMetric.id, name: existingMetric.name, unit: existingMetric.unit || "", value: num };
+            if (idx >= 0) state.draft.extraNumerics[idx] = item;
+            else state.draft.extraNumerics.push(item);
+          }
+        }
+        state.draft.showPicker = false;
+        renderInputTab(stage);
+        showToast(`Using existing "${existingMetric.name}" metric`);
+        return;
+      }
       const newMetric = {
         id: generateClientId("metric"),
         kind: "number",
@@ -1158,26 +1675,25 @@ function renderInputTab(stage) {
   };
   stage.querySelector("#btnCancelEdit")?.addEventListener("click", cancelEdit);
   stage.querySelector("#btnCancelEditFooter")?.addEventListener("click", cancelEdit);
+  stage.querySelector("#btnReloadConflict")?.addEventListener("click", () => {
+    if (state.draft.editingEntryId) {
+      const id = state.draft.editingEntryId;
+      state.draft = createFreshDraft();
+      startEditingEntry(id);
+      showToast("Loaded latest version from server");
+    }
+  });
 
   stage.querySelector("#btnSaveEntry")?.addEventListener("click", handleSaveDraftEntry);
 }
 
 async function handleSaveDraftEntry() {
+  if (state.savingEntry) return;
   const d = state.draft;
   const text = (d.text || "").trim();
 
-  // Gather pinned numeric metrics + extra numeric metrics
+  // Gather extra numeric metrics first, then pinned numeric inputs so live pinned values win
   const numericMap = new Map();
-  for (const m of state.vaultMeta.metrics) {
-    if (!m.pinned) continue;
-    const raw = d.numericValues[m.id];
-    if (raw !== undefined && raw !== null && String(raw).trim() !== "") {
-      const val = parseFloat(raw);
-      if (Number.isFinite(val)) {
-        numericMap.set(m.id, { metricId: m.id, name: m.name, unit: m.unit || "", value: val });
-      }
-    }
-  }
   for (const extra of d.extraNumerics) {
     if (Number.isFinite(Number(extra.value))) {
       numericMap.set(extra.metricId, {
@@ -1186,6 +1702,16 @@ async function handleSaveDraftEntry() {
         unit: extra.unit || "",
         value: Number(extra.value),
       });
+    }
+  }
+  for (const m of state.vaultMeta.metrics) {
+    if (!m.pinned) continue;
+    const raw = d.numericValues[m.id];
+    if (raw !== undefined && raw !== null && String(raw).trim() !== "") {
+      const val = parseFloat(raw);
+      if (Number.isFinite(val)) {
+        numericMap.set(m.id, { metricId: m.id, name: m.name, unit: m.unit || "", value: val });
+      }
     }
   }
   const numericMetrics = Array.from(numericMap.values());
@@ -1208,6 +1734,7 @@ async function handleSaveDraftEntry() {
     quizResults,
   };
 
+  state.savingEntry = true;
   const saveBtn = document.getElementById("btnSaveEntry");
   if (saveBtn) saveBtn.disabled = true;
 
@@ -1220,8 +1747,30 @@ async function handleSaveDraftEntry() {
         body: { ciphertext, expectedUpdatedAt: d.editingUpdatedAt || undefined },
       });
       if (!res.ok) {
+        if (res.status === 409 && res.data && res.data.entry) {
+          // Sync latest remote entry locally and refresh expectedUpdatedAt so user can resolve cleanly
+          const remoteRow = res.data.entry;
+          try {
+            const remoteData = await decryptJson(remoteRow.ciphertext, state.dekBytes, `heyjournal:entry:${remoteRow.id}`);
+            const idx = state.entries.findIndex((e) => e.id === remoteRow.id);
+            const refreshed = {
+              id: remoteRow.id,
+              createdAt: remoteRow.createdAt,
+              updatedAt: remoteRow.updatedAt,
+              data: normalizeEntryData(remoteData, remoteRow.createdAt),
+            };
+            if (idx >= 0) state.entries[idx] = refreshed;
+            else state.entries.unshift(refreshed);
+          } catch (e) {
+            console.error("Failed to decrypt conflicting entry:", e);
+          }
+          d.editingUpdatedAt = remoteRow.updatedAt || "";
+          d.conflictNotice = "This entry was updated on another device. Click 'update entry' again to keep your edits, or load the latest version.";
+          renderActiveTab();
+          showToast("Sync conflict detected — choose how to resolve", 4000);
+          return;
+        }
         showToast((res.data && res.data.error) || "Could not update entry");
-        if (saveBtn) saveBtn.disabled = false;
         return;
       }
       const idx = state.entries.findIndex((e) => e.id === entryId);
@@ -1246,7 +1795,6 @@ async function handleSaveDraftEntry() {
       });
       if (!res.ok) {
         showToast((res.data && res.data.error) || "Could not save entry");
-        if (saveBtn) saveBtn.disabled = false;
         return;
       }
       state.entries.unshift({
@@ -1263,7 +1811,10 @@ async function handleSaveDraftEntry() {
   } catch (err) {
     console.error(err);
     showToast("Encryption error while saving entry");
-    if (saveBtn) saveBtn.disabled = false;
+  } finally {
+    state.savingEntry = false;
+    const btn = document.getElementById("btnSaveEntry");
+    if (btn) btn.disabled = false;
   }
 }
 
@@ -1288,18 +1839,6 @@ function countMetricOccurrences() {
 function renderMetricsTab(stage) {
   const { numCounts, quizCounts } = countMetricOccurrences();
   const categories = ["All", ...Array.from(new Set(state.quizzes.map((q) => q.category || "General"))).sort()];
-
-  const filteredQuizzes = state.quizzes.filter((q) => {
-    if (state.quizCategoryFilter !== "All" && (q.category || "General") !== state.quizCategoryFilter) {
-      return false;
-    }
-    if (state.quizSearch.trim()) {
-      const needle = state.quizSearch.trim().toLowerCase();
-      const hay = `${q.name} ${q.fullName || ""} ${q.shortDescription || ""} ${q.category || ""}`.toLowerCase();
-      return hay.includes(needle);
-    }
-    return true;
-  });
 
   const existingNamesLower = new Set(state.vaultMeta.metrics.map((m) => m.name.toLowerCase()));
   const availableSuggestions = QUICK_METRIC_SUGGESTIONS.filter((s) => !existingNamesLower.has(s.name.toLowerCase()));
@@ -1343,6 +1882,22 @@ function renderMetricsTab(stage) {
               ${state.vaultMeta.metrics
                 .map((m) => {
                   const cnt = numCounts.get(m.id) || 0;
+                  const isEditing = state.editingMetricId === m.id;
+                  if (isEditing) {
+                    return `
+                      <form class="library-card" data-edit-metric-form="${escapeHtml(m.id)}">
+                        <div style="display:flex; flex-direction:column; gap:8px;">
+                          <div class="section-label" style="margin-bottom:0;">edit metric</div>
+                          <input class="metro-input" data-edit-metric-name type="text" value="${escapeHtml(m.name)}" placeholder="metric name" required />
+                          <input class="metro-input" data-edit-metric-unit type="text" value="${escapeHtml(m.unit || "")}" placeholder="unit (optional)" />
+                        </div>
+                        <div class="library-card-actions">
+                          <button type="submit" class="metro-btn accent compact">save</button>
+                          <button type="button" class="metro-btn subtle compact" data-cancel-edit-metric>cancel</button>
+                        </div>
+                      </form>
+                    `;
+                  }
                   return `
                     <div class="library-card">
                       <div>
@@ -1358,6 +1913,7 @@ function renderMetricsTab(stage) {
                         <button type="button" class="metro-btn ${m.pinned ? "accent" : "subtle"} compact" data-pin-metric="${escapeHtml(m.id)}">
                           ${m.pinned ? "pinned to input" : "pin to input"}
                         </button>
+                        <button type="button" class="metro-btn subtle compact" data-edit-metric="${escapeHtml(m.id)}">edit</button>
                         <button type="button" class="metro-btn subtle compact" data-delete-metric="${escapeHtml(m.id)}">remove</button>
                       </div>
                     </div>
@@ -1396,49 +1952,98 @@ function renderMetricsTab(stage) {
           .join("")}
       </div>
 
-      <div class="library-grid">
-        ${filteredQuizzes
-          .map((q) => {
-            const isPinned = state.vaultMeta.pinnedQuizIds.includes(q.id);
-            const cnt = quizCounts.get(q.id) || 0;
-            const scoring = q.scoring || {};
-            return `
-              <div class="library-card">
-                <div>
-                  <div class="library-card-head">
-                    <div>
-                      <div class="library-card-title">${escapeHtml(q.name)}</div>
-                      <div class="library-card-sub">${escapeHtml(q.fullName || "")}</div>
-                    </div>
-                    <span class="category-badge">${escapeHtml(q.category || "Clinical")}</span>
-                  </div>
-                  <p class="library-card-desc" style="margin-top:8px;">${escapeHtml(q.shortDescription || "")}</p>
-                  <div class="library-card-meta" style="margin-top:8px;">
-                    <span>${q.questions.length} items</span>
-                    <span>~${q.estimatedMinutes || 2} min</span>
-                    <span>range ${scoring.min ?? 0}–${scoring.max ?? "?"} ${escapeHtml(scoring.unit || "")}</span>
-                    ${cnt > 0 ? `<span><strong>${cnt} logged</strong></span>` : ""}
-                  </div>
-                </div>
-                <div class="library-card-actions">
-                  <button type="button" class="metro-btn accent compact" data-take-quiz-now="${escapeHtml(q.id)}">take now</button>
-                  <button type="button" class="metro-btn ${isPinned ? "accent" : "subtle"} compact" data-pin-quiz="${escapeHtml(q.id)}">
-                    ${isPinned ? "pinned" : "pin to input"}
-                  </button>
-                  ${
-                    q.resourceUrl
-                      ? `<a class="metro-btn subtle compact" href="${escapeHtml(q.resourceUrl)}" target="_blank" rel="noopener noreferrer">info ↗</a>`
-                      : ""
-                  }
-                </div>
-              </div>
-            `;
-          })
-          .join("")}
-      </div>
+      <div class="library-grid" id="quizCatalogGrid"></div>
       </div>
     </div>
   `;
+
+  const renderQuizCatalogGrid = () => {
+    const grid = stage.querySelector("#quizCatalogGrid");
+    if (!grid) return;
+    const filtered = state.quizzes.filter((q) => {
+      if (state.quizCategoryFilter !== "All" && (q.category || "General") !== state.quizCategoryFilter) {
+        return false;
+      }
+      if (state.quizSearch.trim()) {
+        const needle = state.quizSearch.trim().toLowerCase();
+        const hay = `${q.name} ${q.fullName || ""} ${q.shortDescription || ""} ${q.category || ""}`.toLowerCase();
+        return hay.includes(needle);
+      }
+      return true;
+    });
+
+    if (filtered.length === 0) {
+      grid.innerHTML = `<div class="empty-state" style="grid-column:1 / -1; padding:18px 8px;">No clinical quizzes match your filter.</div>`;
+      return;
+    }
+
+    grid.innerHTML = filtered
+      .map((q) => {
+        const isPinned = state.vaultMeta.pinnedQuizIds.includes(q.id);
+        const cnt = quizCounts.get(q.id) || 0;
+        const scoring = q.scoring || {};
+        const safeUrl = safeExternalUrl(q.resourceUrl);
+        return `
+          <div class="library-card">
+            <div>
+              <div class="library-card-head">
+                <div>
+                  <div class="library-card-title">${escapeHtml(q.name)}</div>
+                  <div class="library-card-sub">${escapeHtml(q.fullName || "")}</div>
+                </div>
+                <span class="category-badge">${escapeHtml(q.category || "Clinical")}</span>
+              </div>
+              <p class="library-card-desc" style="margin-top:8px;">${escapeHtml(q.shortDescription || "")}</p>
+              <div class="library-card-meta" style="margin-top:8px;">
+                <span>${q.questions.length} items</span>
+                <span>~${q.estimatedMinutes || 2} min</span>
+                <span>range ${scoring.min ?? 0}–${scoring.max ?? "?"} ${escapeHtml(scoring.unit || "")}</span>
+                ${cnt > 0 ? `<span><strong>${cnt} logged</strong></span>` : ""}
+              </div>
+            </div>
+            <div class="library-card-actions">
+              <button type="button" class="metro-btn accent compact" data-take-quiz-now="${escapeHtml(q.id)}">take now</button>
+              <button type="button" class="metro-btn ${isPinned ? "accent" : "subtle"} compact" data-pin-quiz="${escapeHtml(q.id)}">
+                ${isPinned ? "pinned" : "pin to input"}
+              </button>
+              ${
+                safeUrl
+                  ? `<a class="metro-btn subtle compact" href="${escapeHtml(safeUrl)}" target="_blank" rel="noopener noreferrer">info ↗</a>`
+                  : ""
+              }
+            </div>
+          </div>
+        `;
+      })
+      .join("");
+
+    grid.querySelectorAll("[data-pin-quiz]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const qid = btn.getAttribute("data-pin-quiz");
+        const idx = state.vaultMeta.pinnedQuizIds.indexOf(qid);
+        const q = state.quizById.get(qid);
+        if (idx >= 0) {
+          state.vaultMeta.pinnedQuizIds.splice(idx, 1);
+          await saveVaultMeta(`Unpinned ${q?.name || qid}`);
+        } else {
+          state.vaultMeta.pinnedQuizIds.push(qid);
+          await saveVaultMeta(`Pinned ${q?.name || qid} to Input`);
+        }
+        renderQuizCatalogGrid();
+      });
+    });
+
+    grid.querySelectorAll("[data-take-quiz-now]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const qid = btn.getAttribute("data-take-quiz-now");
+        setActiveTab("input");
+        const existing = state.draft.quizResults.find((r) => r.quizId === qid);
+        openQuizRunnerModal(qid, existing ? existing.answers : null);
+      });
+    });
+  };
+
+  renderQuizCatalogGrid();
 
   // Bindings
   stage.querySelector("#newMetricForm").addEventListener("submit", async (e) => {
@@ -1466,6 +2071,10 @@ function renderMetricsTab(stage) {
     btn.addEventListener("click", async () => {
       const name = btn.getAttribute("data-suggest-name");
       const unit = btn.getAttribute("data-suggest-unit");
+      if (state.vaultMeta.metrics.some((m) => m.name.toLowerCase() === name.toLowerCase())) {
+        return;
+      }
+      btn.disabled = true;
       state.vaultMeta.metrics.push({
         id: generateClientId("metric"),
         kind: "number",
@@ -1490,6 +2099,45 @@ function renderMetricsTab(stage) {
     });
   });
 
+  stage.querySelectorAll("[data-edit-metric]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      state.editingMetricId = btn.getAttribute("data-edit-metric");
+      renderMetricsTab(stage);
+      stage.querySelector("[data-edit-metric-name]")?.focus();
+    });
+  });
+
+  stage.querySelectorAll("[data-cancel-edit-metric]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      state.editingMetricId = null;
+      renderMetricsTab(stage);
+    });
+  });
+
+  stage.querySelectorAll("[data-edit-metric-form]").forEach((form) => {
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const id = form.getAttribute("data-edit-metric-form");
+      const m = state.vaultMeta.metrics.find((x) => x.id === id);
+      if (!m) return;
+      const newName = form.querySelector("[data-edit-metric-name]").value.trim();
+      const newUnit = form.querySelector("[data-edit-metric-unit]").value.trim();
+      if (!newName) {
+        showToast("Metric name cannot be empty");
+        return;
+      }
+      if (state.vaultMeta.metrics.some((x) => x.id !== id && x.name.toLowerCase() === newName.toLowerCase())) {
+        showToast(`"${newName}" is already in your metrics`);
+        return;
+      }
+      m.name = newName;
+      m.unit = newUnit;
+      state.editingMetricId = null;
+      await saveVaultMeta(`Updated "${newName}"`);
+      renderMetricsTab(stage);
+    });
+  });
+
   stage.querySelectorAll("[data-delete-metric]").forEach((btn) => {
     btn.addEventListener("click", async () => {
       const id = btn.getAttribute("data-delete-metric");
@@ -1504,43 +2152,16 @@ function renderMetricsTab(stage) {
 
   stage.querySelector("#quizSearchInput").addEventListener("input", (e) => {
     state.quizSearch = e.target.value;
-    renderMetricsTab(stage);
-    const inp = stage.querySelector("#quizSearchInput");
-    if (inp) {
-      inp.focus();
-      inp.setSelectionRange(inp.value.length, inp.value.length);
-    }
+    renderQuizCatalogGrid();
   });
 
   stage.querySelectorAll("[data-quiz-cat]").forEach((btn) => {
     btn.addEventListener("click", () => {
       state.quizCategoryFilter = btn.getAttribute("data-quiz-cat");
-      renderMetricsTab(stage);
-    });
-  });
-
-  stage.querySelectorAll("[data-pin-quiz]").forEach((btn) => {
-    btn.addEventListener("click", async () => {
-      const qid = btn.getAttribute("data-pin-quiz");
-      const idx = state.vaultMeta.pinnedQuizIds.indexOf(qid);
-      const q = state.quizById.get(qid);
-      if (idx >= 0) {
-        state.vaultMeta.pinnedQuizIds.splice(idx, 1);
-        await saveVaultMeta(`Unpinned ${q?.name || qid}`);
-      } else {
-        state.vaultMeta.pinnedQuizIds.push(qid);
-        await saveVaultMeta(`Pinned ${q?.name || qid} to Input`);
-      }
-      renderMetricsTab(stage);
-    });
-  });
-
-  stage.querySelectorAll("[data-take-quiz-now]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const qid = btn.getAttribute("data-take-quiz-now");
-      setActiveTab("input");
-      const existing = state.draft.quizResults.find((r) => r.quizId === qid);
-      openQuizRunnerModal(qid, existing ? existing.answers : null);
+      stage.querySelectorAll("[data-quiz-cat]").forEach((el) => {
+        el.classList.toggle("active", el.getAttribute("data-quiz-cat") === state.quizCategoryFilter);
+      });
+      renderQuizCatalogGrid();
     });
   });
 }
@@ -1560,39 +2181,6 @@ function renderReviewTab(stage) {
     }
   }
 
-  const needle = state.reviewSearch.trim().toLowerCase();
-  const metricFilter = state.reviewMetricFilter;
-
-  const filtered = state.entries.filter((e) => {
-    if (metricFilter !== "all") {
-      if (metricFilter.startsWith("num:")) {
-        const target = metricFilter.slice(4);
-        if (!(e.data.numericMetrics || []).some((m) => m.name.toLowerCase() === target)) return false;
-      } else if (metricFilter.startsWith("quiz:")) {
-        const target = metricFilter.slice(5);
-        if (!(e.data.quizResults || []).some((q) => q.quizId === target)) return false;
-      }
-    }
-    if (needle) {
-      const textHit = (e.data.text || "").toLowerCase().includes(needle);
-      const numHit = (e.data.numericMetrics || []).some((m) => m.name.toLowerCase().includes(needle));
-      const quizHit = (e.data.quizResults || []).some((q) =>
-        `${q.quizName || ""} ${q.quizId || ""} ${q.band?.label || ""}`.toLowerCase().includes(needle)
-      );
-      return textHit || numHit || quizHit;
-    }
-    return true;
-  });
-
-  // Group into Day Cards in reverse chronological order
-  const dayMap = new Map();
-  for (const e of filtered) {
-    const key = localDateKeyFromIso(e.data.timestamp);
-    if (!dayMap.has(key)) dayMap.set(key, []);
-    dayMap.get(key).push(e);
-  }
-  const dayKeys = Array.from(dayMap.keys()).sort((a, b) => b.localeCompare(a));
-
   stage.innerHTML = `
     <div class="review-toolbar">
       <input class="metro-input" id="reviewSearchInput" type="search"
@@ -1604,13 +2192,52 @@ function renderReviewTab(stage) {
           .sort((a, b) => a[1].localeCompare(b[1]))
           .map(
             ([val, label]) =>
-              `<option value="${escapeHtml(val)}" ${metricFilter === val ? "selected" : ""}>${escapeHtml(label)}</option>`
+              `<option value="${escapeHtml(val)}" ${state.reviewMetricFilter === val ? "selected" : ""}>${escapeHtml(label)}</option>`
           )
           .join("")}
       </select>
     </div>
+    <div id="reviewEntriesList"></div>
+  `;
 
-    ${
+  const renderReviewEntriesList = () => {
+    const listEl = stage.querySelector("#reviewEntriesList");
+    if (!listEl) return;
+
+    const needle = state.reviewSearch.trim().toLowerCase();
+    const metricFilter = state.reviewMetricFilter;
+
+    const filtered = state.entries.filter((e) => {
+      if (metricFilter !== "all") {
+        if (metricFilter.startsWith("num:")) {
+          const target = metricFilter.slice(4);
+          if (!(e.data.numericMetrics || []).some((m) => m.name.toLowerCase() === target)) return false;
+        } else if (metricFilter.startsWith("quiz:")) {
+          const target = metricFilter.slice(5);
+          if (!(e.data.quizResults || []).some((q) => q.quizId === target)) return false;
+        }
+      }
+      if (needle) {
+        const textHit = (e.data.text || "").toLowerCase().includes(needle);
+        const numHit = (e.data.numericMetrics || []).some((m) => m.name.toLowerCase().includes(needle));
+        const quizHit = (e.data.quizResults || []).some((q) =>
+          `${q.quizName || ""} ${q.quizId || ""} ${q.band?.label || ""}`.toLowerCase().includes(needle)
+        );
+        return textHit || numHit || quizHit;
+      }
+      return true;
+    });
+
+    // Group into Day Cards in reverse chronological order
+    const dayMap = new Map();
+    for (const e of filtered) {
+      const key = localDateKeyFromIso(e.data.timestamp);
+      if (!dayMap.has(key)) dayMap.set(key, []);
+      dayMap.get(key).push(e);
+    }
+    const dayKeys = Array.from(dayMap.keys()).sort((a, b) => b.localeCompare(a));
+
+    listEl.innerHTML =
       dayKeys.length === 0
         ? `
           <div class="metro-slot">
@@ -1705,63 +2332,64 @@ function renderReviewTab(stage) {
                 </article>
               `;
             })
-            .join("")
-    }
-  `;
+            .join("");
+
+    listEl.querySelectorAll("[data-entry-menu]").forEach((btn) => {
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const id = btn.getAttribute("data-entry-menu");
+        state.openEntryMenuId = state.openEntryMenuId === id ? null : id;
+        renderReviewEntriesList();
+      });
+    });
+
+    listEl.querySelectorAll("[data-edit-entry]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const id = btn.getAttribute("data-edit-entry");
+        startEditingEntry(id);
+      });
+    });
+
+    listEl.querySelectorAll("[data-delete-entry]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const id = btn.getAttribute("data-delete-entry");
+        await handleDeleteEntry(id);
+      });
+    });
+
+    listEl.querySelectorAll("[data-inspect-entry]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const entryId = btn.getAttribute("data-inspect-entry");
+        const qIdx = Number(btn.getAttribute("data-quiz-idx"));
+        const entry = state.entries.find((x) => x.id === entryId);
+        if (entry && entry.data.quizResults && entry.data.quizResults[qIdx]) {
+          openQuizBreakdownModal(entry.data.quizResults[qIdx], entry.data.timestamp);
+        }
+      });
+    });
+  };
+
+  renderReviewEntriesList();
 
   stage.querySelector("#reviewSearchInput").addEventListener("input", (e) => {
     state.reviewSearch = e.target.value;
-    renderReviewTab(stage);
-    const inp = stage.querySelector("#reviewSearchInput");
-    if (inp) {
-      inp.focus();
-      inp.setSelectionRange(inp.value.length, inp.value.length);
-    }
+    renderReviewEntriesList();
   });
 
   stage.querySelector("#reviewMetricFilter").addEventListener("change", (e) => {
     state.reviewMetricFilter = e.target.value;
-    renderReviewTab(stage);
-  });
-
-  stage.querySelectorAll("[data-entry-menu]").forEach((btn) => {
-    btn.addEventListener("click", (e) => {
-      e.stopPropagation();
-      const id = btn.getAttribute("data-entry-menu");
-      state.openEntryMenuId = state.openEntryMenuId === id ? null : id;
-      renderReviewTab(stage);
-    });
-  });
-
-  stage.querySelectorAll("[data-edit-entry]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const id = btn.getAttribute("data-edit-entry");
-      startEditingEntry(id);
-    });
-  });
-
-  stage.querySelectorAll("[data-delete-entry]").forEach((btn) => {
-    btn.addEventListener("click", async () => {
-      const id = btn.getAttribute("data-delete-entry");
-      await handleDeleteEntry(id);
-    });
-  });
-
-  stage.querySelectorAll("[data-inspect-entry]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const entryId = btn.getAttribute("data-inspect-entry");
-      const qIdx = Number(btn.getAttribute("data-quiz-idx"));
-      const entry = state.entries.find((x) => x.id === entryId);
-      if (entry && entry.data.quizResults && entry.data.quizResults[qIdx]) {
-        openQuizBreakdownModal(entry.data.quizResults[qIdx], entry.data.timestamp);
-      }
-    });
+    renderReviewEntriesList();
   });
 }
 
 function startEditingEntry(entryId) {
   const entry = state.entries.find((e) => e.id === entryId);
   if (!entry) return;
+  if (state.draft.editingEntryId !== entryId && hasUnsavedDraft(state.draft)) {
+    if (!confirm("Discard your current unsaved draft on the Input tab and edit this entry?")) {
+      return;
+    }
+  }
 
   const draft = createFreshDraft();
   draft.editingEntryId = entry.id;
@@ -1793,6 +2421,9 @@ async function handleDeleteEntry(entryId) {
     return;
   }
   state.entries = state.entries.filter((e) => e.id !== entryId);
+  if (state.draft.editingEntryId === entryId) {
+    state.draft = createFreshDraft();
+  }
   state.openEntryMenuId = null;
   renderShell();
   showToast("Entry deleted");
@@ -1804,6 +2435,7 @@ async function handleDeleteEntry(entryId) {
 function collectMetricSeries() {
   const numericGroups = new Map();
   const quizGroups = new Map();
+  const metricDefById = new Map((state.vaultMeta.metrics || []).map((m) => [m.id, m]));
 
   for (const e of state.entries) {
     const tsMs = new Date(e.data.timestamp).getTime();
@@ -1813,12 +2445,13 @@ function collectMetricSeries() {
       const val = Number(m.value);
       if (!Number.isFinite(val)) continue;
       const key = m.metricId || `name:${m.name.toLowerCase()}`;
+      const liveDef = m.metricId ? metricDefById.get(m.metricId) : null;
       if (!numericGroups.has(key)) {
         numericGroups.set(key, {
           key: `num:${key}`,
           kind: "number",
-          name: m.name,
-          unit: m.unit || "",
+          name: (liveDef && liveDef.name) || m.name,
+          unit: liveDef ? liveDef.unit || "" : m.unit || "",
           higherIsWorse: null,
           points: [],
         });
@@ -1959,7 +2592,7 @@ function renderReportTab(stage) {
             };
           })
           .filter(Boolean);
-        chartUnit = "pts";
+        chartUnit = subDef.unit || "pts";
         minBound = typeof subDef.min === "number" ? subDef.min : 0;
         maxBound = typeof subDef.max === "number" ? subDef.max : null;
         severityBands = subDef.severityBands || null;
@@ -1999,7 +2632,7 @@ function renderReportTab(stage) {
           ${
             latestBand
               ? `<span class="severity-badge level-${escapeHtml(latestBand.level)}">${escapeHtml(latestBand.label)}</span>`
-              : `<span class="category-badge">${rangedPoints.length} pts</span>`
+              : `<span class="category-badge">${rangedPoints.length} ${rangedPoints.length === 1 ? "entry" : "entries"}</span>`
           }
         </div>
         <div class="slot-body">
@@ -2107,7 +2740,11 @@ function openQuizBreakdownModal(quizResult, timestampStr) {
 
 function closeModal() {
   state.modalState = null;
-  document.getElementById("modalBackdrop")?.classList.remove("open");
+  const backdrop = document.getElementById("modalBackdrop");
+  if (backdrop) {
+    backdrop.classList.remove("open");
+    backdrop.setAttribute("aria-hidden", "true");
+  }
 }
 
 function renderModal() {
@@ -2115,12 +2752,86 @@ function renderModal() {
   const panel = document.getElementById("modalPanel");
   if (!backdrop || !panel || !state.modalState) return;
   backdrop.classList.add("open");
+  backdrop.setAttribute("aria-hidden", "false");
 
   if (state.modalState.type === "quiz-runner") {
     renderQuizRunnerPanel(panel);
   } else if (state.modalState.type === "quiz-breakdown") {
     renderQuizBreakdownPanel(panel);
+  } else if (state.modalState.type === "recovery-prompt") {
+    renderRecoveryPromptPanel(panel);
+  } else if (state.modalState.type === "recovery-key") {
+    renderRecoveryKeyPanel(panel);
   }
+}
+
+function renderRecoveryPromptPanel(panel) {
+  panel.innerHTML = `
+    <div class="flyout-head">
+      <div>
+        <h2 class="slot-title">save a recovery key?</h2>
+        <div style="font-size:12px; color:var(--text-secondary); margin-top:2px;">optional · zero-knowledge protection</div>
+      </div>
+      <button type="button" class="metro-btn subtle compact" id="btnCloseModal">skip</button>
+    </div>
+    <p style="font-size:14px; color:var(--text-secondary); line-height:1.5;">
+      Because HeyJournal is zero-knowledge encrypted, the server cannot reset a forgotten password.
+      You can generate an optional <strong>printable Emergency Recovery Key</strong> now (or anytime later in Settings → Security &amp; Export) to store safely offline.
+    </p>
+    <div class="auth-actions">
+      <button type="button" class="metro-btn accent" id="btnPromptGenRecovery">generate recovery key</button>
+      <button type="button" class="metro-btn subtle" id="btnPromptSkip">skip for now</button>
+    </div>
+  `;
+  panel.querySelector("#btnCloseModal").addEventListener("click", closeModal);
+  panel.querySelector("#btnPromptSkip").addEventListener("click", closeModal);
+  panel.querySelector("#btnPromptGenRecovery").addEventListener("click", async (e) => {
+    e.currentTarget.disabled = true;
+    e.currentTarget.textContent = "generating...";
+    await handleGenerateRecoveryKey();
+  });
+}
+
+function renderRecoveryKeyPanel(panel) {
+  const { recoveryKey, username } = state.modalState;
+  panel.innerHTML = `
+    <div class="flyout-head">
+      <div>
+        <h2 class="slot-title">emergency recovery key</h2>
+        <div style="font-size:12px; color:var(--text-secondary); margin-top:2px;">shown once · store safely offline</div>
+      </div>
+      <button type="button" class="metro-btn subtle compact" id="btnCloseModal">done</button>
+    </div>
+    <div class="recovery-key-display">${escapeHtml(recoveryKey)}</div>
+    <div class="auth-notice" style="margin-bottom:0;">
+      <strong>Important:</strong> The server never stores this key and cannot show it again.
+      Print it or save it in a password manager. Anyone with your username and this key can reset your password and decrypt your journal.
+    </div>
+    <div class="auth-actions">
+      <div style="display:flex; gap:8px; flex-wrap:wrap;">
+        <button type="button" class="metro-btn subtle compact" id="btnCopyRecoveryKey">copy key</button>
+        <button type="button" class="metro-btn accent compact" id="btnPrintRecoveryKey">print / save sheet</button>
+      </div>
+      <button type="button" class="metro-btn subtle compact" id="btnRecoverySaved">i've saved it</button>
+    </div>
+  `;
+  panel.querySelector("#btnCloseModal").addEventListener("click", closeModal);
+  panel.querySelector("#btnRecoverySaved").addEventListener("click", closeModal);
+  panel.querySelector("#btnCopyRecoveryKey").addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText(recoveryKey);
+      showToast("Recovery key copied to clipboard");
+    } catch (e) {
+      showToast("Select the key above to copy it");
+    }
+  });
+  panel.querySelector("#btnPrintRecoveryKey").addEventListener("click", () => {
+    openPrintableRecoverySheet({
+      username,
+      recoveryKey,
+      serverUrl: typeof window !== "undefined" ? window.location.origin : "",
+    });
+  });
 }
 
 function renderQuizRunnerPanel(panel) {
@@ -2187,8 +2898,8 @@ function renderQuizRunnerPanel(panel) {
       <p style="font-size:12px; color:var(--text-secondary); line-height:1.45;">
         ${escapeHtml(quiz.scoring?.formulaDescription || "")}
         ${
-          quiz.resourceUrl
-            ? ` <a href="${escapeHtml(quiz.resourceUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(quiz.resourceLabel || "Learn more")} ↗</a>`
+          safeExternalUrl(quiz.resourceUrl)
+            ? ` <a href="${escapeHtml(safeExternalUrl(quiz.resourceUrl))}" target="_blank" rel="noopener noreferrer">${escapeHtml(quiz.resourceLabel || "Learn more")} ↗</a>`
             : ""
         }
       </p>
@@ -2294,8 +3005,8 @@ function renderQuizRunnerPanel(panel) {
         <div style="font-size:12px; color:var(--text-secondary);">
           question ${ms.stepIndex + 1} of ${questions.length}
           ${
-            quiz.resourceUrl
-              ? ` · <a href="${escapeHtml(quiz.resourceUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(quiz.resourceLabel || "about")} ↗</a>`
+            safeExternalUrl(quiz.resourceUrl)
+              ? ` · <a href="${escapeHtml(safeExternalUrl(quiz.resourceUrl))}" target="_blank" rel="noopener noreferrer">${escapeHtml(quiz.resourceLabel || "about")} ↗</a>`
               : ""
           }
         </div>
@@ -2392,8 +3103,8 @@ function renderQuizBreakdownPanel(panel) {
         <div style="font-size:12px; color:var(--text-secondary);">
           ${escapeHtml(new Date(timestampStr).toLocaleString())}
           ${
-            quizDef?.resourceUrl
-              ? ` · <a href="${escapeHtml(quizDef.resourceUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(quizDef.resourceLabel || "reference")} ↗</a>`
+            safeExternalUrl(quizDef?.resourceUrl)
+              ? ` · <a href="${escapeHtml(safeExternalUrl(quizDef.resourceUrl))}" target="_blank" rel="noopener noreferrer">${escapeHtml(quizDef.resourceLabel || "reference")} ↗</a>`
               : ""
           }
         </div>
@@ -2471,7 +3182,11 @@ function renderQuizBreakdownPanel(panel) {
 function openFlyout(tab = "appearance") {
   state.flyoutOpen = true;
   state.flyoutTab = tab;
-  document.getElementById("flyoutBackdrop")?.classList.add("open");
+  const backdrop = document.getElementById("flyoutBackdrop");
+  if (backdrop) {
+    backdrop.classList.add("open");
+    backdrop.setAttribute("aria-hidden", "false");
+  }
   renderFlyout();
   if (tab === "admin" && state.authStatus.user?.isAdmin) {
     refreshAdminData();
@@ -2480,16 +3195,23 @@ function openFlyout(tab = "appearance") {
 
 function closeFlyout() {
   state.flyoutOpen = false;
-  document.getElementById("flyoutBackdrop")?.classList.remove("open");
+  const backdrop = document.getElementById("flyoutBackdrop");
+  if (backdrop) {
+    backdrop.classList.remove("open");
+    backdrop.setAttribute("aria-hidden", "true");
+  }
 }
 
 async function refreshAdminData() {
+  state.adminLoadError = "";
   const res = await apiFetch("/api/admin/users");
   if (res.ok) {
     state.adminData = res.data;
-    if (state.flyoutOpen && state.flyoutTab === "admin") {
-      renderFlyout();
-    }
+  } else {
+    state.adminLoadError = (res.data && res.data.error) || "Could not load admin status.";
+  }
+  if (state.flyoutOpen && state.flyoutTab === "admin") {
+    renderFlyout();
   }
 }
 
@@ -2563,7 +3285,7 @@ function renderAppearanceFlyoutTab(body, isUnlocked) {
     <div class="flyout-section">
       <div class="flyout-section-title">theme (${ThemeRegistry.size} available)</div>
       <p style="font-size:12px; color:var(--text-secondary);">
-        Uses the exact drop-in theme engine from Family Hub (<code>public/themes/</code>).
+        Drop-in visual themes loaded from <code>public/themes/</code>.
       </p>
       <div class="theme-picker-grid" id="themePickerGrid"></div>
     </div>
@@ -2635,10 +3357,10 @@ function renderAppearanceFlyoutTab(body, isUnlocked) {
     card.className = `theme-card ${tDef.id === activeTheme.id ? "selected" : ""}`;
     card.setAttribute("aria-pressed", String(tDef.id === activeTheme.id));
     card.innerHTML = `
-      <div class="theme-preview-strip" style="background:${escapeHtml(p.canvas)};">
-        <div class="theme-preview-tile" style="background:${escapeHtml(p.tile)};">
-          <span class="theme-preview-accent" style="background:${escapeHtml(p.accent)};"></span>
-          ${dotColors.map((c) => `<span class="theme-preview-dot" style="background:${escapeHtml(c)};"></span>`).join("")}
+      <div class="theme-preview-strip" style="background:${sanitizeColor(p.canvas, "#000000")};">
+        <div class="theme-preview-tile" style="background:${sanitizeColor(p.tile, "#111111")};">
+          <span class="theme-preview-accent" style="background:${sanitizeColor(p.accent, "#00ABA9")};"></span>
+          ${dotColors.map((c) => `<span class="theme-preview-dot" style="background:${sanitizeColor(c, "#00ABA9")};"></span>`).join("")}
         </div>
       </div>
       <div class="theme-card-head">
@@ -2712,6 +3434,9 @@ function renderAppearanceFlyoutTab(body, isUnlocked) {
 function renderSecurityFlyoutTab(body) {
   const backendLabel = getCryptoBackendLabel();
   const isNative = isNativeWebCryptoAvailable();
+  const user = state.authStatus.user || {};
+  const autoLockMinutes = Number(state.vaultMeta.settings?.autoLockMinutes || 0);
+  const kdfIters = Number(user.kdfIterations || DEFAULT_KDF_ITERATIONS);
 
   body.innerHTML = `
     <div class="flyout-section">
@@ -2720,7 +3445,7 @@ function renderSecurityFlyoutTab(body) {
         <div>
           <div class="card-title">AES-256-GCM active</div>
           <div style="font-size:12px; color:var(--text-secondary); margin-top:4px;">
-            Engine: ${escapeHtml(backendLabel)}<br/>
+            Engine: ${escapeHtml(backendLabel)} · PBKDF2 ${kdfIters.toLocaleString()} iterations<br/>
             Keys stay strictly on your device. Plaintext never reaches the server.
           </div>
         </div>
@@ -2729,7 +3454,7 @@ function renderSecurityFlyoutTab(body) {
     </div>
 
     <div class="flyout-section">
-      <div class="flyout-section-title">session lock</div>
+      <div class="flyout-section-title">session &amp; auto-lock</div>
       <div class="extension-card">
         <div>
           <div class="card-title">stay unlocked in this tab</div>
@@ -2739,24 +3464,67 @@ function renderSecurityFlyoutTab(body) {
         </div>
         <div class="metro-toggle ${state.stayUnlocked ? "on" : ""}" id="toggleStayUnlocked" role="switch" aria-checked="${state.stayUnlocked}" tabindex="0"></div>
       </div>
+      <div class="extension-card">
+        <div>
+          <div class="card-title">auto-lock on inactivity</div>
+          <div style="font-size:12px; color:var(--text-secondary); margin-top:3px;">
+            Clears your vault key from memory after idle time (great for shared household devices).
+          </div>
+        </div>
+        <select class="metro-select" id="selectAutoLock" aria-label="Auto-lock timeout" style="width:auto; min-width:120px;">
+          <option value="0" ${autoLockMinutes === 0 ? "selected" : ""}>Off</option>
+          <option value="15" ${autoLockMinutes === 15 ? "selected" : ""}>15 min</option>
+          <option value="30" ${autoLockMinutes === 30 ? "selected" : ""}>30 min</option>
+          <option value="60" ${autoLockMinutes === 60 ? "selected" : ""}>1 hour</option>
+        </select>
+      </div>
     </div>
 
     <div class="flyout-section">
-      <div class="flyout-section-title">client-side decrypted export</div>
+      <div class="flyout-section-title">emergency recovery key</div>
+      <div class="extension-card">
+        <div>
+          <div class="card-title">${user.hasRecoveryKey ? "recovery key active" : "not configured"}</div>
+          <div style="font-size:12px; color:var(--text-secondary); margin-top:3px;">
+            ${
+              user.hasRecoveryKey
+                ? `Created ${escapeHtml(user.recoveryCreatedAt ? new Date(user.recoveryCreatedAt).toLocaleDateString() : "previously")}. Lets you reset a forgotten password locally without exposing plaintext to the server.`
+                : "Generate a printable offline key so you can recover your encrypted vault if you ever forget your password."
+            }
+          </div>
+        </div>
+        <span class="category-badge">${user.hasRecoveryKey ? "ready" : "off"}</span>
+      </div>
+      <div style="display:flex; flex-wrap:wrap; gap:8px;">
+        <button type="button" class="metro-btn subtle compact" id="btnGenRecoveryKey">
+          ${user.hasRecoveryKey ? "regenerate key" : "generate recovery key"}
+        </button>
+        ${
+          user.hasRecoveryKey
+            ? `<button type="button" class="metro-btn danger compact" id="btnRemoveRecoveryKey">remove key</button>`
+            : ""
+        }
+      </div>
+    </div>
+
+    <div class="flyout-section">
+      <div class="flyout-section-title">client-side export &amp; import</div>
       <p style="font-size:12px; color:var(--text-secondary);">
-        Exported files are decrypted locally on your device — store them securely.
+        Exports are decrypted locally on your device — store them securely. Importing re-encrypts entries locally before uploading.
       </p>
       <div style="display:flex; flex-wrap:wrap; gap:8px;">
         <button type="button" class="metro-btn subtle compact" id="btnFlyoutExportJson">download json</button>
         <button type="button" class="metro-btn subtle compact" id="btnFlyoutExportCsv">download csv</button>
         <button type="button" class="metro-btn subtle compact" id="btnFlyoutClinician">clinician summary</button>
+        <button type="button" class="metro-btn subtle compact" id="btnFlyoutImportJson">import json</button>
+        <input type="file" id="importJsonFileInput" accept="application/json,.json" class="hidden" />
       </div>
     </div>
 
     <div class="flyout-section">
       <div class="flyout-section-title">change password</div>
       <p style="font-size:12px; color:var(--text-secondary);">
-        Re-wraps your vault key locally with your new password without altering historical entries.
+        Re-wraps your vault key locally with your new password (${DEFAULT_KDF_ITERATIONS.toLocaleString()} PBKDF2 iterations) without altering historical entries.
       </p>
       <form id="changePasswordForm" style="display:flex; flex-direction:column; gap:10px;">
         <input class="metro-input" id="curPwInput" type="password" placeholder="current password" required autocomplete="current-password" />
@@ -2769,10 +3537,21 @@ function renderSecurityFlyoutTab(body) {
     </div>
 
     <div class="flyout-section">
-      <div class="flyout-section-title">vault session</div>
-      <div>
+      <div class="flyout-section-title">vault session &amp; account</div>
+      <div style="display:flex; flex-wrap:wrap; gap:10px; align-items:center;">
         <button type="button" class="metro-btn danger" id="btnFlyoutLogout">lock &amp; sign out</button>
+        <button type="button" class="metro-btn subtle compact" id="btnToggleDeleteSelf">delete my account...</button>
       </div>
+      <form id="deleteSelfForm" class="hidden" style="display:flex; flex-direction:column; gap:10px; margin-top:8px; padding:12px; background:var(--bg-tile); border-left:3px solid var(--danger-color);">
+        <p style="font-size:12px; color:var(--text-secondary);">
+          Permanently deletes your account and all encrypted entries on this server. Export your JSON first if you want a copy.
+        </p>
+        <input class="metro-input" id="delSelfPwInput" type="password" placeholder="confirm current password" required autocomplete="current-password" />
+        <div style="display:flex; gap:8px;">
+          <button type="submit" class="metro-btn danger compact" id="btnConfirmDeleteSelf">permanently delete account</button>
+          <button type="button" class="metro-btn subtle compact" id="btnCancelDeleteSelf">cancel</button>
+        </div>
+      </form>
     </div>
   `;
 
@@ -2787,6 +3566,37 @@ function renderSecurityFlyoutTab(body) {
     if (e.key === "Enter" || e.key === " ") {
       e.preventDefault();
       flipStay();
+    }
+  });
+
+  body.querySelector("#selectAutoLock").addEventListener("change", async (e) => {
+    const mins = Math.max(0, parseInt(e.target.value, 10) || 0);
+    state.vaultMeta.settings.autoLockMinutes = mins;
+    state.lastActivityMs = Date.now();
+    await saveVaultMeta(mins > 0 ? `Auto-lock set to ${mins} min` : "Auto-lock disabled");
+  });
+
+  body.querySelector("#btnGenRecoveryKey").addEventListener("click", async (e) => {
+    if (user.hasRecoveryKey && !confirm("Generate a new recovery key? Your previous recovery key will stop working.")) {
+      return;
+    }
+    const btn = e.currentTarget;
+    btn.disabled = true;
+    btn.textContent = "generating...";
+    await handleGenerateRecoveryKey();
+    btn.disabled = false;
+    btn.textContent = state.authStatus.user?.hasRecoveryKey ? "regenerate key" : "generate recovery key";
+  });
+
+  body.querySelector("#btnRemoveRecoveryKey")?.addEventListener("click", async () => {
+    if (!confirm("Remove your emergency recovery key? Without it, a forgotten password cannot be recovered.")) return;
+    const res = await apiFetch("/api/auth/recovery-key", { method: "DELETE" });
+    if (res.ok) {
+      state.authStatus.user = res.data.user;
+      renderFlyout();
+      showToast("Recovery key removed");
+    } else {
+      showToast((res.data && res.data.error) || "Could not remove recovery key");
     }
   });
 
@@ -2806,7 +3616,73 @@ function renderSecurityFlyoutTab(body) {
       username: state.authStatus.user?.username || "",
     });
   });
+
+  const fileInput = body.querySelector("#importJsonFileInput");
+  body.querySelector("#btnFlyoutImportJson").addEventListener("click", () => {
+    fileInput.value = "";
+    fileInput.click();
+  });
+  fileInput.addEventListener("change", async () => {
+    const file = fileInput.files && fileInput.files[0];
+    if (!file) return;
+    await handleImportJsonFile(file);
+  });
+
   body.querySelector("#btnFlyoutLogout").addEventListener("click", handleLockOrLogout);
+
+  const delForm = body.querySelector("#deleteSelfForm");
+  body.querySelector("#btnToggleDeleteSelf").addEventListener("click", () => {
+    delForm.classList.toggle("hidden");
+    if (!delForm.classList.contains("hidden")) {
+      body.querySelector("#delSelfPwInput")?.focus();
+    }
+  });
+  body.querySelector("#btnCancelDeleteSelf").addEventListener("click", () => {
+    delForm.reset();
+    delForm.classList.add("hidden");
+  });
+  delForm.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const pw = body.querySelector("#delSelfPwInput").value;
+    if (!pw) return;
+    if (!confirm("Final confirmation: permanently delete your account and all encrypted journal entries?")) return;
+    const btn = body.querySelector("#btnConfirmDeleteSelf");
+    btn.disabled = true;
+    btn.textContent = "deleting...";
+    try {
+      const curUser = state.authStatus.user;
+      const derived = await deriveAuthAndKek(pw, curUser.kdfSalt, curUser.kdfIterations);
+      derived.kekBytes.fill(0);
+      const res = await apiFetch("/api/auth/account", {
+        method: "DELETE",
+        body: { currentAuthKey: derived.authKeyB64 },
+      });
+      if (!res.ok) {
+        showToast((res.data && res.data.error) || "Could not delete account", 4500);
+        btn.disabled = false;
+        btn.textContent = "permanently delete account";
+        return;
+      }
+      _wipeDecryptedMemoryState();
+      state.authUsernameDraft = "";
+      state.autoLockReason = "";
+      const statusRes = await apiFetch("/api/auth/status");
+      if (statusRes.ok) {
+        state.authStatus = statusRes.data;
+      } else {
+        state.authStatus.authenticated = false;
+        state.authStatus.user = null;
+      }
+      state.authMode = state.authStatus.userCount === 0 ? "register" : "login";
+      state.authError = "";
+      renderShell();
+      showToast("Account permanently deleted");
+    } catch (err) {
+      showToast("Error verifying password");
+      btn.disabled = false;
+      btn.textContent = "permanently delete account";
+    }
+  });
 
   body.querySelector("#changePasswordForm").addEventListener("submit", async (e) => {
     e.preventDefault();
@@ -2829,9 +3705,12 @@ function renderSecurityFlyoutTab(body) {
       const curDerived = await deriveAuthAndKek(curPw, user.kdfSalt, user.kdfIterations);
       // Verify locally that current password actually unwraps the DEK
       const verifiedDek = await unwrapDek(user.wrappedDek, curDerived.kekBytes);
+      curDerived.kekBytes.fill(0);
       const newSalt = generateSaltB64();
       const newDerived = await deriveAuthAndKek(newPw, newSalt, DEFAULT_KDF_ITERATIONS);
       const newWrappedDek = await wrapDek(verifiedDek, newDerived.kekBytes);
+      verifiedDek.fill(0);
+      newDerived.kekBytes.fill(0);
 
       const res = await apiFetch("/api/auth/change-password", {
         method: "POST",
@@ -2863,8 +3742,133 @@ function renderSecurityFlyoutTab(body) {
   });
 }
 
+async function handleImportJsonFile(file) {
+  if (!state.dekBytes) return;
+  let parsed = null;
+  try {
+    const text = await file.text();
+    parsed = JSON.parse(text);
+  } catch (e) {
+    showToast("Could not read JSON file — invalid syntax");
+    return;
+  }
+  if (!parsed || typeof parsed !== "object" || !Array.isArray(parsed.entries)) {
+    showToast("Unsupported file format (expected HeyJournal JSON export)");
+    return;
+  }
+
+  const incomingEntries = parsed.entries;
+  const incomingMetrics = Array.isArray(parsed.metrics) ? parsed.metrics : [];
+  if (incomingEntries.length === 0 && incomingMetrics.length === 0) {
+    showToast("This export file contains no entries or metrics");
+    return;
+  }
+
+  const msg = `Import up to ${incomingEntries.length} ${incomingEntries.length === 1 ? "entry" : "entries"} and ${incomingMetrics.length} ${incomingMetrics.length === 1 ? "metric" : "metrics"} from "${file.name}"? Existing entries with matching IDs will be kept untouched.`;
+  if (!confirm(msg)) return;
+
+  showToast("Encrypting & importing entries locally...", 4000);
+
+  // Merge new custom numeric metrics (avoid duplicate IDs or names)
+  let metricsAdded = 0;
+  for (const m of incomingMetrics) {
+    if (!m || typeof m.name !== "string" || !m.name.trim()) continue;
+    const exists = state.vaultMeta.metrics.some(
+      (x) => (m.id && x.id === m.id) || x.name.toLowerCase() === m.name.trim().toLowerCase()
+    );
+    if (!exists) {
+      state.vaultMeta.metrics.push({
+        id: typeof m.id === "string" && /^[a-zA-Z0-9_-]{8,64}$/.test(m.id) ? m.id : generateClientId("metric"),
+        kind: "number",
+        name: m.name.trim(),
+        unit: typeof m.unit === "string" ? m.unit.trim() : "",
+        pinned: Boolean(m.pinned),
+        createdAt: typeof m.createdAt === "string" ? m.createdAt : new Date().toISOString(),
+      });
+      metricsAdded++;
+    }
+  }
+  if (metricsAdded > 0) {
+    await saveVaultMeta();
+  }
+
+  // Encrypt non-duplicate entries locally and upload in chunks of 200
+  const existingIds = new Set(state.entries.map((e) => e.id));
+  const prepared = [];
+  let localSkipped = 0;
+  for (const raw of incomingEntries) {
+    if (!raw || typeof raw !== "object") continue;
+    const rawId = typeof raw.id === "string" ? raw.id.trim() : "";
+    const entryId = /^[a-zA-Z0-9_-]{8,64}$/.test(rawId) ? rawId : generateClientId("entry");
+    if (existingIds.has(entryId)) {
+      localSkipped++;
+      continue;
+    }
+    const payload = normalizeEntryData(raw, raw.createdAt || new Date().toISOString());
+    if (!payload.text && payload.numericMetrics.length === 0 && payload.quizResults.length === 0) {
+      continue;
+    }
+    const ciphertext = await encryptJson(payload, state.dekBytes, `heyjournal:entry:${entryId}`);
+    prepared.push({ id: entryId, ciphertext, payload });
+    existingIds.add(entryId);
+  }
+
+  let totalImported = 0;
+  let serverSkipped = 0;
+  const CHUNK_SIZE = 200;
+  for (let i = 0; i < prepared.length; i += CHUNK_SIZE) {
+    const chunk = prepared.slice(i, i + CHUNK_SIZE);
+    const res = await apiFetch("/api/entries/batch", {
+      method: "POST",
+      body: {
+        entries: chunk.map((c) => ({ id: c.id, ciphertext: c.ciphertext })),
+      },
+    });
+    if (!res.ok) {
+      showToast((res.data && res.data.error) || "Import interrupted by server error", 4500);
+      break;
+    }
+    totalImported += Number(res.data.importedCount || 0);
+    serverSkipped += Number(res.data.skippedCount || 0);
+    const payloadById = new Map(chunk.map((c) => [c.id, c.payload]));
+    for (const row of res.data.imported || []) {
+      const data = payloadById.get(row.id);
+      if (data) {
+        state.entries.push({
+          id: row.id,
+          createdAt: row.createdAt,
+          updatedAt: row.updatedAt,
+          data,
+        });
+      }
+    }
+  }
+
+  state.entries.sort((a, b) => new Date(b.data.timestamp).getTime() - new Date(a.data.timestamp).getTime());
+  renderShell();
+  const totalSkipped = localSkipped + serverSkipped;
+  const summaryParts = [`Imported ${totalImported} ${totalImported === 1 ? "entry" : "entries"}`];
+  if (metricsAdded > 0) summaryParts.push(`${metricsAdded} ${metricsAdded === 1 ? "metric" : "metrics"}`);
+  if (totalSkipped > 0) summaryParts.push(`${totalSkipped} skipped as duplicates`);
+  showToast(summaryParts.join(" · "), 4500);
+}
+
 function renderAdminFlyoutTab(body) {
   if (!state.adminData) {
+    if (state.adminLoadError) {
+      body.innerHTML = `
+        <div class="empty-state">
+          <p style="margin-bottom:12px;">${escapeHtml(state.adminLoadError)}</p>
+          <button type="button" class="metro-btn subtle compact" id="btnRetryAdminLoad">retry</button>
+        </div>
+      `;
+      body.querySelector("#btnRetryAdminLoad")?.addEventListener("click", () => {
+        state.adminLoadError = "";
+        renderFlyout();
+        refreshAdminData();
+      });
+      return;
+    }
     body.innerHTML = `<div class="empty-state">Loading server accounts &amp; backup status...</div>`;
     return;
   }
@@ -2909,7 +3913,12 @@ function renderAdminFlyoutTab(body) {
               ${
                 u.id === selfId
                   ? `<span class="category-badge">you</span>`
-                  : `<button type="button" class="metro-btn danger compact" data-admin-del-user="${escapeHtml(u.id)}" data-admin-del-name="${escapeHtml(u.username)}">delete</button>`
+                  : `<div style="display:flex; gap:6px; flex-wrap:wrap;">
+                       <button type="button" class="metro-btn subtle compact" data-admin-role-user="${escapeHtml(u.id)}" data-admin-role-next="${u.isAdmin ? "0" : "1"}" data-admin-role-name="${escapeHtml(u.username)}">
+                         ${u.isAdmin ? "remove admin" : "make admin"}
+                       </button>
+                       <button type="button" class="metro-btn danger compact" data-admin-del-user="${escapeHtml(u.id)}" data-admin-del-name="${escapeHtml(u.username)}">delete</button>
+                     </div>`
               }
             </div>
           `
@@ -2933,13 +3942,21 @@ function renderAdminFlyoutTab(body) {
                 .slice(0, 7)
                 .map(
                   (b) => `
-                  <div style="display:flex; justify-content:space-between; font-size:12px; color:var(--text-secondary); padding:6px 10px; background:var(--bg-tile);">
-                    <span style="font-family:var(--font-mono);">${escapeHtml(b.name)}</span>
-                    <span>${Math.max(1, Math.round(b.sizeBytes / 1024))} KB</span>
+                  <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; font-size:12px; color:var(--text-secondary); padding:6px 10px; background:var(--bg-tile);">
+                    <span style="font-family:var(--font-mono); overflow:hidden; text-overflow:ellipsis;">${escapeHtml(b.name)}</span>
+                    <div style="display:flex; align-items:center; gap:10px; flex-shrink:0;">
+                      <span>${Math.max(1, Math.round(b.sizeBytes / 1024))} KB</span>
+                      <a class="metro-btn subtle compact" style="min-height:26px; padding:2px 8px; font-size:11px;" href="/api/admin/backups/${encodeURIComponent(b.name)}" download="${escapeHtml(b.name)}">download</a>
+                    </div>
                   </div>
                 `
                 )
                 .join("")}
+              ${
+                backups.length > 7
+                  ? `<div style="font-size:11px; color:var(--text-muted); padding:2px 4px;">Showing latest 7 of ${backups.length} backups in <code>data/backups/</code>.</div>`
+                  : ""
+              }
             </div>
           `
       }
@@ -2957,6 +3974,8 @@ function renderAdminFlyoutTab(body) {
       state.authStatus.allowSignups = res.data.allowSignups;
       renderFlyout();
       showToast(res.data.allowSignups ? "Open registration enabled" : "New registrations disabled");
+    } else {
+      showToast((res.data && res.data.error) || "Could not update registration policy");
     }
   };
   toggleEl.addEventListener("click", flipSignups);
@@ -2965,6 +3984,26 @@ function renderAdminFlyoutTab(body) {
       e.preventDefault();
       flipSignups();
     }
+  });
+
+  body.querySelectorAll("[data-admin-role-user]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const uid = btn.getAttribute("data-admin-role-user");
+      const uname = btn.getAttribute("data-admin-role-name");
+      const nextAdmin = btn.getAttribute("data-admin-role-next") === "1";
+      const verb = nextAdmin ? `Grant admin privileges to "${uname}"?` : `Remove admin privileges from "${uname}"?`;
+      if (!confirm(verb)) return;
+      const res = await apiFetch(`/api/admin/users/${encodeURIComponent(uid)}/role`, {
+        method: "PUT",
+        body: { isAdmin: nextAdmin },
+      });
+      if (res.ok) {
+        showToast(nextAdmin ? `"${uname}" is now an admin` : `Removed admin role from "${uname}"`);
+        await refreshAdminData();
+      } else {
+        showToast((res.data && res.data.error) || "Could not update role");
+      }
+    });
   });
 
   body.querySelectorAll("[data-admin-del-user]").forEach((btn) => {
@@ -2982,14 +4021,19 @@ function renderAdminFlyoutTab(body) {
     });
   });
 
-  body.querySelector("#btnTriggerBackup").addEventListener("click", async () => {
+  const backupBtn = body.querySelector("#btnTriggerBackup");
+  backupBtn.addEventListener("click", async () => {
+    backupBtn.disabled = true;
+    backupBtn.textContent = "backing up...";
     const res = await apiFetch("/api/admin/backup", { method: "POST" });
     if (res.ok) {
       state.adminData.backups = res.data.backups || [];
       renderFlyout();
       showToast(`Backup saved: ${res.data.backupName}`);
     } else {
-      showToast("Backup failed");
+      backupBtn.disabled = false;
+      backupBtn.textContent = "backup now";
+      showToast((res.data && res.data.error) || "Backup failed");
     }
   });
 }
@@ -2999,7 +4043,37 @@ function renderAdminFlyoutTab(body) {
 // ============================================================================
 function wireGlobalEvents() {
   document.getElementById("btnSettings")?.addEventListener("click", () => openFlyout("appearance"));
+  document.getElementById("btnSyncVault")?.addEventListener("click", () => syncVaultInBackground({ manual: true }));
   document.getElementById("btnLockVault")?.addEventListener("click", handleLockOrLogout);
+
+  // Track user activity (throttled) for configurable auto-lock inactivity timer
+  const markActivity = () => {
+    const now = Date.now();
+    if (now - state.lastActivityMs > 5000) {
+      state.lastActivityMs = now;
+    }
+  };
+  for (const evt of ["pointerdown", "keydown", "touchstart", "scroll"]) {
+    document.addEventListener(evt, markActivity, { passive: true });
+  }
+  setInterval(checkAutoLock, 15000);
+
+  // On tab wake / return: enforce auto-lock immediately, or quietly sync newer entries from other devices
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState !== "visible") return;
+    checkAutoLock();
+    if (state.authStatus.authenticated && state.dekBytes && Date.now() - state.lastVaultSyncMs >= 60000) {
+      syncVaultInBackground({ manual: false });
+    }
+  });
+
+  // Warn before accidentally closing/reloading a tab with unsaved journal text or metrics
+  window.addEventListener("beforeunload", (e) => {
+    if (state.authStatus.authenticated && state.dekBytes && hasUnsavedDraft(state.draft)) {
+      e.preventDefault();
+      e.returnValue = "";
+    }
+  });
 
   document.getElementById("flyoutBackdrop")?.addEventListener("click", (e) => {
     if (e.target.id === "flyoutBackdrop") closeFlyout();
@@ -3021,14 +4095,25 @@ function wireGlobalEvents() {
     }
   });
 
-  // Keyboard shortcuts: Esc closes modal/flyout; number keys 1-6 answer step-by-step quiz
+  // Keyboard shortcuts: Esc closes modal/flyout/menu; number keys 1-9 answer step-by-step quiz
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape") {
       if (state.modalState) closeModal();
       else if (state.flyoutOpen) closeFlyout();
+      else if (state.openEntryMenuId) {
+        state.openEntryMenuId = null;
+        if (state.activeTab === "review") renderActiveTab();
+      }
       return;
     }
-    if (state.modalState && state.modalState.type === "quiz-runner" && state.modalState.viewMode === "step") {
+    if (
+      !e.ctrlKey &&
+      !e.metaKey &&
+      !e.altKey &&
+      state.modalState &&
+      state.modalState.type === "quiz-runner" &&
+      state.modalState.viewMode === "step"
+    ) {
       const idx = parseInt(e.key, 10) - 1;
       if (idx >= 0 && idx <= 8) {
         const btns = document.querySelectorAll("#modalPanel [data-step-val]");
