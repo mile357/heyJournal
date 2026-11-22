@@ -19,10 +19,10 @@ import {
   normalizeRecoveryKey,
   unwrapDek,
   wrapDek,
-} from "./crypto.js?v=4";
+} from "./crypto.js?v=5";
 
-import { findSeverityBand, formatScoreValue, getQuestionOptions, scoreQuiz } from "./quiz-engine.js?v=4";
-import { computeSeriesStats, filterPointsByRange, renderMetricChart } from "./charts.js?v=4";
+import { findSeverityBand, formatScoreValue, getQuestionOptions, scoreQuiz } from "./quiz-engine.js?v=5";
+import { computeSeriesStats, filterPointsByRange, renderMetricChart } from "./charts.js?v=5";
 import {
   ASSET_VERSION,
   ThemeRegistry,
@@ -33,13 +33,13 @@ import {
   getEffectiveThemeMode,
   getThemeAccents,
   sanitizeColor,
-} from "./theme-engine.js?v=4";
+} from "./theme-engine.js?v=5";
 import {
   downloadDecryptedCsv,
   downloadDecryptedJson,
   openPrintableClinicianSummary,
   openPrintableRecoverySheet,
-} from "./export.js?v=4";
+} from "./export.js?v=5";
 
 const SESSION_DEK_KEY = "heyjournal_session_dek_v1";
 const STAY_UNLOCKED_PREF_KEY = "heyjournal_stay_unlocked_pref_v1";
