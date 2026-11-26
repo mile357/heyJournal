@@ -19,10 +19,10 @@ import {
   normalizeRecoveryKey,
   unwrapDek,
   wrapDek,
-} from "./crypto.js?v=6";
+} from "./crypto.js?v=7";
 
-import { findSeverityBand, formatScoreValue, getQuestionOptions, scoreQuiz } from "./quiz-engine.js?v=6";
-import { computeSeriesStats, filterPointsByRange, renderMetricChart } from "./charts.js?v=6";
+import { findSeverityBand, formatScoreValue, getQuestionOptions, scoreQuiz } from "./quiz-engine.js?v=7";
+import { computeSeriesStats, filterPointsByRange, renderMetricChart } from "./charts.js?v=7";
 import {
   ASSET_VERSION,
   ThemeRegistry,
@@ -33,13 +33,13 @@ import {
   getEffectiveThemeMode,
   getThemeAccents,
   sanitizeColor,
-} from "./theme-engine.js?v=6";
+} from "./theme-engine.js?v=7";
 import {
   downloadDecryptedCsv,
   downloadDecryptedJson,
   openPrintableClinicianSummary,
   openPrintableRecoverySheet,
-} from "./export.js?v=6";
+} from "./export.js?v=7";
 
 const SESSION_DEK_KEY = "heyjournal_session_dek_v1";
 const STAY_UNLOCKED_PREF_KEY = "heyjournal_stay_unlocked_pref_v1";
@@ -69,7 +69,8 @@ const QUICK_METRIC_SUGGESTIONS = [
 // APPLICATION STATE
 // ============================================================================
 const state = {
-  authStatus: { authenticated: false, userCount: 0, allowSignups: true, user: null },
+  authStatus: { authenticated: false, userCount: null, allowSignups: true, user: null },
+  serverUnreachable: false,
   dekBytes: null, // In-memory 32-byte AES-256 vault key (NEVER sent to server)
   stayUnlocked: false,
   vaultMeta: structuredCloneSafe(DEFAULT_VAULT_META),
@@ -595,6 +596,28 @@ function renderShell() {
 function renderAuthCard() {
   const card = document.getElementById("authCard");
   if (!card) return;
+
+  if (state.serverUnreachable) {
+    const errHtml = state.authError ? `<div class="auth-error">${escapeHtml(state.authError)}</div>` : "";
+    card.innerHTML = `
+      <div class="slot-header">
+        <div class="slot-title-group"><h2 class="slot-title">server unreachable</h2></div>
+      </div>
+      <div class="slot-body">
+        <p class="auth-lead">
+          Your browser couldn't reach your heyJo server right now (for example, offline, VPN blocking local LAN access, or the server restarting). Your journal data on the server is unaffected.
+        </p>
+        ${errHtml}
+        <div class="auth-actions">
+          <button type="button" class="metro-btn accent" id="btnRetryServer" ${state.authBusy ? "disabled" : ""}>
+            ${state.authBusy ? "checking..." : "retry connection"}
+          </button>
+        </div>
+      </div>
+    `;
+    card.querySelector("#btnRetryServer")?.addEventListener("click", handleRetryServerConnection);
+    return;
+  }
 
   const isFirstUser = state.authStatus.userCount === 0;
   const hasSessionPendingUnlock = Boolean(state.authStatus.authenticated && state.authStatus.user && !state.dekBytes);
@@ -4219,6 +4242,50 @@ function wireGlobalEvents() {
   });
 }
 
+async function loadInitialServerState() {
+  await Promise.all([
+    discoverAndLoadThemes(),
+    (async () => {
+      const qRes = await apiFetch("/api/quizzes");
+      if (qRes.ok && Array.isArray(qRes.data.quizzes)) {
+        state.quizzes = qRes.data.quizzes;
+        state.quizById.clear();
+        for (const q of state.quizzes) state.quizById.set(q.id, q);
+      }
+    })(),
+    (async () => {
+      const aRes = await apiFetch("/api/auth/status");
+      if (aRes.ok && aRes.data && typeof aRes.data.userCount === "number") {
+        state.authStatus = aRes.data;
+        state.serverUnreachable = false;
+        state.authError = "";
+      } else {
+        state.serverUnreachable = true;
+        state.authError =
+          (aRes.data && aRes.data.error) ||
+          "Could not connect to /api/auth/status. Check your Wi-Fi, VPN, or server status and retry.";
+      }
+    })(),
+  ]);
+}
+
+async function handleRetryServerConnection() {
+  if (state.authBusy) return;
+  state.authBusy = true;
+  renderAuthCard();
+  await loadInitialServerState();
+  state.authBusy = false;
+  applyUserThemeAndTitle();
+  if (!state.serverUnreachable && state.authStatus.authenticated && state.authStatus.user) {
+    const restored = tryRestoreSessionDek(state.authStatus.user.id);
+    if (restored) {
+      state.dekBytes = restored;
+      await loadAndDecryptVault();
+    }
+  }
+  renderShell();
+}
+
 async function boot() {
   state.stayUnlocked = loadStayUnlockedPref();
   wireGlobalEvents();
@@ -4234,26 +4301,12 @@ async function boot() {
     }
   } catch (e) {}
 
-  await Promise.all([
-    discoverAndLoadThemes(),
-    (async () => {
-      const qRes = await apiFetch("/api/quizzes");
-      if (qRes.ok && Array.isArray(qRes.data.quizzes)) {
-        state.quizzes = qRes.data.quizzes;
-        state.quizById.clear();
-        for (const q of state.quizzes) state.quizById.set(q.id, q);
-      }
-    })(),
-    (async () => {
-      const aRes = await apiFetch("/api/auth/status");
-      if (aRes.ok) state.authStatus = aRes.data;
-    })(),
-  ]);
+  await loadInitialServerState();
 
   applyUserThemeAndTitle();
 
   // If browser cookie is active AND user opted to stay unlocked in this tab, restore DEK from sessionStorage
-  if (state.authStatus.authenticated && state.authStatus.user) {
+  if (!state.serverUnreachable && state.authStatus.authenticated && state.authStatus.user) {
     const restored = tryRestoreSessionDek(state.authStatus.user.id);
     if (restored) {
       state.dekBytes = restored;
