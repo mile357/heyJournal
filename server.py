@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-HeyJournal — Zero-Knowledge Encrypted Journal Server
+heyJo — Zero-Knowledge Encrypted Journal Server
 Lightweight Python 3 stdlib + SQLite (WAL) API & Static Server.
 Runs identically on macOS and Linux/Coolify Docker with zero external dependencies.
 """
@@ -350,7 +350,7 @@ def discover_themes():
                 }
             )
         except Exception as exc:
-            sys.stderr.write(f"[HeyJournal] Skipping invalid theme '{folder}': {exc}\n")
+            sys.stderr.write(f"[heyJo] Skipping invalid theme '{folder}': {exc}\n")
             continue
 
     found.sort(key=lambda t: (t.get("order", 100), t.get("name", "").lower()))
@@ -382,7 +382,7 @@ def discover_quizzes():
             if not qid or not re.match(r"^[a-zA-Z0-9_-]+$", qid):
                 continue
             if qid in seen_ids:
-                sys.stderr.write(f"[HeyJournal] Skipping duplicate quiz id '{qid}' in '{fname}'\n")
+                sys.stderr.write(f"[heyJo] Skipping duplicate quiz id '{qid}' in '{fname}'\n")
                 continue
             questions = quiz.get("questions")
             scoring = quiz.get("scoring")
@@ -395,7 +395,7 @@ def discover_quizzes():
             quiz["fileName"] = fname
             found.append(quiz)
         except Exception as exc:
-            sys.stderr.write(f"[HeyJournal] Skipping invalid quiz '{fname}': {exc}\n")
+            sys.stderr.write(f"[heyJo] Skipping invalid quiz '{fname}': {exc}\n")
             continue
 
     found.sort(key=lambda q: (str(q.get("category") or "").lower(), str(q.get("name") or "").lower()))
@@ -496,7 +496,7 @@ def _backup_scheduler_loop(stop_event):
             perform_sqlite_backup()
             last_backup_day = datetime.now().date()
         except Exception as exc:
-            sys.stderr.write(f"[HeyJournal] Nightly backup failed: {exc}\n")
+            sys.stderr.write(f"[heyJo] Nightly backup failed: {exc}\n")
 
 
 def _check_rate_limit(client_ip):
@@ -770,7 +770,7 @@ class JournalRequestHandler(SimpleHTTPRequestHandler):
         except (BrokenPipeError, ConnectionResetError):
             pass
         except Exception as exc:
-            sys.stderr.write(f"[HeyJournal] Unhandled API error on {self.command} {self.path}: {exc}\n")
+            sys.stderr.write(f"[heyJo] Unhandled API error on {self.command} {self.path}: {exc}\n")
             try:
                 self._send_json(500, {"error": "Internal server error"})
             except Exception:
@@ -2060,7 +2060,7 @@ def run_server():
     signal.signal(signal.SIGTERM, _shutdown)
     signal.signal(signal.SIGINT, _shutdown)
 
-    print(f"HeyJournal listening on http://0.0.0.0:{PORT}", flush=True)
+    print(f"heyJo listening on http://0.0.0.0:{PORT}", flush=True)
     try:
         httpd.serve_forever()
     finally:
@@ -2069,7 +2069,7 @@ def run_server():
 
 
 def main():
-    parser = argparse.ArgumentParser(description="HeyJournal zero-knowledge encrypted journal server")
+    parser = argparse.ArgumentParser(description="heyJo zero-knowledge encrypted journal server")
     parser.add_argument("--list-users", action="store_true", help="List registered accounts (no plaintext access)")
     parser.add_argument("--promote-admin", metavar="USERNAME", help="Grant admin privileges to an existing account")
     parser.add_argument("--delete-user", metavar="USERNAME", help="Permanently delete an account and its entries")

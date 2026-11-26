@@ -1,5 +1,5 @@
 /**
- * HeyJournal — Zero-Knowledge Encrypted Journal & Clinical Metric Tracker
+ * heyJo — Zero-Knowledge Encrypted Journal & Clinical Metric Tracker
  * Native ES Modules, zero external dependencies, 20-theme Family Hub parity.
  */
 
@@ -19,10 +19,10 @@ import {
   normalizeRecoveryKey,
   unwrapDek,
   wrapDek,
-} from "./crypto.js?v=5";
+} from "./crypto.js?v=6";
 
-import { findSeverityBand, formatScoreValue, getQuestionOptions, scoreQuiz } from "./quiz-engine.js?v=5";
-import { computeSeriesStats, filterPointsByRange, renderMetricChart } from "./charts.js?v=5";
+import { findSeverityBand, formatScoreValue, getQuestionOptions, scoreQuiz } from "./quiz-engine.js?v=6";
+import { computeSeriesStats, filterPointsByRange, renderMetricChart } from "./charts.js?v=6";
 import {
   ASSET_VERSION,
   ThemeRegistry,
@@ -33,20 +33,20 @@ import {
   getEffectiveThemeMode,
   getThemeAccents,
   sanitizeColor,
-} from "./theme-engine.js?v=5";
+} from "./theme-engine.js?v=6";
 import {
   downloadDecryptedCsv,
   downloadDecryptedJson,
   openPrintableClinicianSummary,
   openPrintableRecoverySheet,
-} from "./export.js?v=5";
+} from "./export.js?v=6";
 
 const SESSION_DEK_KEY = "heyjournal_session_dek_v1";
 const STAY_UNLOCKED_PREF_KEY = "heyjournal_stay_unlocked_pref_v1";
 
 const DEFAULT_VAULT_META = {
   settings: {
-    journalName: "heyjournal",
+    journalName: "heyJo",
     themeId: "metro",
     theme: "dark",
     accentColor: "#00ABA9",
@@ -343,6 +343,9 @@ function normalizeVaultMeta(raw) {
           ? { ...raw.settings.themeAccents }
           : {},
     };
+    if (!base.settings.journalName || base.settings.journalName === "heyjournal") {
+      base.settings.journalName = "heyJo";
+    }
   }
   if (Array.isArray(raw.metrics)) {
     base.metrics = raw.metrics.filter((m) => m && typeof m.id === "string" && typeof m.name === "string");
@@ -537,7 +540,7 @@ async function saveVaultMeta(toastMsg = "") {
 function applyUserThemeAndTitle() {
   applyThemeAndAccent(state.vaultMeta.settings);
   const titleEl = document.getElementById("appTitle");
-  const name = (state.vaultMeta.settings && state.vaultMeta.settings.journalName) || "heyjournal";
+  const name = (state.vaultMeta.settings && state.vaultMeta.settings.journalName) || "heyJo";
   if (titleEl) titleEl.textContent = name;
   document.title = name;
 }
@@ -606,7 +609,7 @@ function renderAuthCard() {
 
   const httpWarning = !isNativeWebCryptoAvailable()
     ? `<div class="auth-notice">
-         <strong>LAN HTTP Mode:</strong> Native Web Crypto requires HTTPS, so HeyJournal is using its built-in pure-JS AES-256-GCM engine. For best transport security, serving over HTTPS (Tailscale or Cloudflare Tunnel) is recommended.
+         <strong>LAN HTTP Mode:</strong> Native Web Crypto requires HTTPS, so heyJo is using its built-in pure-JS AES-256-GCM engine. For best transport security, serving over HTTPS (Tailscale or Cloudflare Tunnel) is recommended.
        </div>`
     : "";
 
@@ -1465,8 +1468,8 @@ function renderInputTab(stage) {
         <div class="slot-title-group">
           <h2 class="slot-title">${d.editingEntryId ? "edit entry" : "new entry"}</h2>
         </div>
-        <button type="button" class="metro-btn subtle compact" id="btnTogglePicker">
-          ${d.showPicker ? "hide metric picker" : "+ add metric / quiz"}
+        <button type="button" class="metro-btn accent compact" id="btnSaveEntry">
+          ${d.editingEntryId ? "update entry" : "save entry"}
         </button>
       </div>
       <div class="slot-body">
@@ -1512,6 +1515,22 @@ function renderInputTab(stage) {
 
         <textarea class="metro-textarea" id="entryTextInput" placeholder="what's on your mind?">${escapeHtml(d.text)}</textarea>
 
+        <div class="input-actions-row">
+          <button type="button" class="metro-btn subtle compact" id="btnTogglePicker">
+            ${d.showPicker ? "hide metric picker" : "+ add metric / quiz"}
+          </button>
+        </div>
+
+        ${pickerHtml}
+
+        ${pinnedSectionHtml}
+
+        ${
+          attachedChips.length > 0
+            ? `<div class="attached-bar" style="margin-top:4px;">${attachedChips.join("")}</div>`
+            : ""
+        }
+
         ${
           !d.editingEntryId &&
           state.entries.length === 0 &&
@@ -1526,30 +1545,8 @@ function renderInputTab(stage) {
             : ""
         }
 
-        ${pinnedSectionHtml}
-
-        ${
-          attachedChips.length > 0
-            ? `<div class="attached-bar" style="margin-top:4px;">${attachedChips.join("")}</div>`
-            : ""
-        }
-
-        ${pickerHtml}
-
-        <div class="input-footer" style="margin-top:6px;">
-          <span style="font-size:12px; color:var(--text-muted);">
-            Encrypted locally with AES-256-GCM before saving
-          </span>
-          <div style="display:flex; gap:10px; align-items:center;">
-            ${
-              d.editingEntryId
-                ? `<button type="button" class="metro-btn subtle" id="btnCancelEditFooter">cancel</button>`
-                : ""
-            }
-            <button type="button" class="metro-btn accent" id="btnSaveEntry">
-              ${d.editingEntryId ? "update entry" : "save entry"}
-            </button>
-          </div>
+        <div class="input-crypto-note">
+          Encrypted locally with AES-256-GCM before saving
         </div>
       </div>
     </div>
@@ -1743,7 +1740,6 @@ function renderInputTab(stage) {
     renderInputTab(stage);
   };
   stage.querySelector("#btnCancelEdit")?.addEventListener("click", cancelEdit);
-  stage.querySelector("#btnCancelEditFooter")?.addEventListener("click", cancelEdit);
   stage.querySelector("#btnReloadConflict")?.addEventListener("click", () => {
     if (state.draft.editingEntryId) {
       const id = state.draft.editingEntryId;
@@ -2844,7 +2840,7 @@ function renderRecoveryPromptPanel(panel) {
       <button type="button" class="metro-btn subtle compact" id="btnCloseModal">skip</button>
     </div>
     <p style="font-size:14px; color:var(--text-secondary); line-height:1.5;">
-      Because HeyJournal is zero-knowledge encrypted, the server cannot reset a forgotten password.
+      Because heyJo is zero-knowledge encrypted, the server cannot reset a forgotten password.
       You can generate an optional <strong>printable Emergency Recovery Key</strong> now (or anytime later in Settings → Security &amp; Export) to store safely offline.
     </p>
     <div class="auth-actions">
@@ -3411,7 +3407,7 @@ function renderAppearanceFlyoutTab(body, isUnlocked) {
           <div class="flyout-section">
             <div class="flyout-section-title">journal title</div>
             <div class="picker-row">
-              <input class="metro-input" id="journalNameInput" value="${escapeHtml(settings.journalName || "heyjournal")}" />
+              <input class="metro-input" id="journalNameInput" value="${escapeHtml(settings.journalName || "heyJo")}" />
               <button type="button" class="metro-btn accent compact" id="btnSaveJournalName">rename</button>
             </div>
           </div>
@@ -3505,7 +3501,7 @@ function renderAppearanceFlyoutTab(body, isUnlocked) {
   });
 
   body.querySelector("#btnSaveJournalName")?.addEventListener("click", async () => {
-    const val = body.querySelector("#journalNameInput").value.trim() || "heyjournal";
+    const val = body.querySelector("#journalNameInput").value.trim() || "heyJo";
     settings.journalName = val;
     applyUserThemeAndTitle();
     await saveVaultMeta(`Renamed to ${val}`);
@@ -3834,7 +3830,7 @@ async function handleImportJsonFile(file) {
     return;
   }
   if (!parsed || typeof parsed !== "object" || !Array.isArray(parsed.entries)) {
-    showToast("Unsupported file format (expected HeyJournal JSON export)");
+    showToast("Unsupported file format (expected heyJo JSON export)");
     return;
   }
 

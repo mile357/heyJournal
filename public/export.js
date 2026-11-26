@@ -1,9 +1,9 @@
 /**
- * HeyJournal — Client-Side Decrypted Exports & Printable Clinician Summary
+ * heyJo — Client-Side Decrypted Exports & Printable Clinician Summary
  * All formatting happens strictly in the browser using already-decrypted data.
  */
 
-import { computeSeriesStats, filterPointsByRange } from "./charts.js?v=5";
+import { computeSeriesStats, filterPointsByRange } from "./charts.js?v=6";
 
 function formatLocalDatePart(date) {
   if (!(date instanceof Date) || Number.isNaN(date.getTime())) return "";
@@ -54,7 +54,7 @@ export function downloadDecryptedJson(entries, vaultMeta, username = "user") {
   const stamp = new Date().toISOString().slice(0, 10);
   const payload = {
     exportedAt: new Date().toISOString(),
-    app: "HeyJournal",
+    app: "heyJo",
     version: 1,
     username,
     settings: vaultMeta?.settings || {},
@@ -70,7 +70,7 @@ export function downloadDecryptedJson(entries, vaultMeta, username = "user") {
     })),
   };
   triggerDownload(
-    `heyjournal-export-${stamp}.json`,
+    `heyjo-export-${stamp}.json`,
     JSON.stringify(payload, null, 2),
     "application/json;charset=utf-8"
   );
@@ -132,7 +132,7 @@ export function downloadDecryptedCsv(entries) {
     rows.push(row.map(csvEscape).join(","));
   }
 
-  triggerDownload(`heyjournal-export-${stamp}.csv`, rows.join("\r\n"), "text/csv;charset=utf-8");
+  triggerDownload(`heyjo-export-${stamp}.csv`, rows.join("\r\n"), "text/csv;charset=utf-8");
 }
 
 export function openPrintableClinicianSummary({
@@ -240,7 +240,7 @@ export function openPrintableClinicianSummary({
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>HeyJournal — Personal Health & Mood Summary</title>
+  <title>heyJo — Personal Health & Mood Summary</title>
   <style>
     body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; color: #111; margin: 32px; line-height: 1.45; }
     h1 { font-size: 24px; font-weight: 600; margin: 0 0 4px 0; }
@@ -265,7 +265,7 @@ export function openPrintableClinicianSummary({
     <button type="button" class="print-btn" id="btnPrintSummaryDoc">Print / Save as PDF</button>
     <span class="muted">or press Ctrl/Cmd + P</span>
   </div>
-  <h1>HeyJournal — Longitudinal Summary</h1>
+  <h1>heyJo — Longitudinal Summary</h1>
   <div class="meta">Account: ${htmlEscape(username)} · Period: ${htmlEscape(rangeLabel)} · Generated: ${htmlEscape(generated)}</div>
 
   <h2>Tracked Metrics Overview</h2>
@@ -289,9 +289,9 @@ export function openPrintableClinicianSummary({
   }
 
   <div class="disclaimer">
-    Generated locally on the user's device from client-side decrypted HeyJournal records. Self-assessment scores are provided for longitudinal tracking and discussion with a qualified clinician and do not constitute a medical diagnosis.
+    Generated locally on the user's device from client-side decrypted heyJo records. Self-assessment scores are provided for longitudinal tracking and discussion with a qualified clinician and do not constitute a medical diagnosis.
   </div>
-  ${scriptOrigin ? `<script src="${htmlEscape(scriptOrigin)}/print-summary.js?v=5"></script>` : ""}
+  ${scriptOrigin ? `<script src="${htmlEscape(scriptOrigin)}/print-summary.js?v=6"></script>` : ""}
 </body>
 </html>`;
 
@@ -307,7 +307,7 @@ export function openPrintableClinicianSummary({
     URL.revokeObjectURL(url);
     // Fallback if popup blocked: trigger download of the printable HTML
     const stamp = formatLocalDatePart(new Date()) || new Date().toISOString().slice(0, 10);
-    triggerDownload(`heyjournal-clinician-summary-${stamp}.html`, docHtml, "text/html;charset=utf-8");
+    triggerDownload(`heyjo-clinician-summary-${stamp}.html`, docHtml, "text/html;charset=utf-8");
   }
 }
 
@@ -317,13 +317,13 @@ export function openPrintableRecoverySheet({ username = "", recoveryKey = "", se
     typeof window !== "undefined" && window.location && /^https?:\/\//.test(window.location.origin)
       ? window.location.origin
       : "";
-  const originLabel = serverUrl || scriptOrigin || "your HeyJournal server";
+  const originLabel = serverUrl || scriptOrigin || "your heyJo server";
 
   const docHtml = `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>HeyJournal — Emergency Recovery Key</title>
+  <title>heyJo — Emergency Recovery Key</title>
   <style>
     body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; color: #111; margin: 40px; line-height: 1.5; max-width: 680px; }
     h1 { font-size: 24px; font-weight: 600; margin: 0 0 6px 0; }
@@ -345,7 +345,7 @@ export function openPrintableRecoverySheet({ username = "", recoveryKey = "", se
     <button type="button" class="print-btn" id="btnPrintSummaryDoc">Print / Save as PDF</button>
     <span class="muted">or press Ctrl/Cmd + P</span>
   </div>
-  <h1>HeyJournal — Emergency Recovery Kit</h1>
+  <h1>heyJo — Emergency Recovery Kit</h1>
   <div class="meta">Account: <strong>${htmlEscape(username)}</strong> · Server: ${htmlEscape(originLabel)} · Created: ${htmlEscape(generated)}</div>
 
   <div class="key-box">
@@ -365,7 +365,7 @@ export function openPrintableRecoverySheet({ username = "", recoveryKey = "", se
     <li>Enter your username (<strong>${htmlEscape(username)}</strong>) and the 32-character key above.</li>
     <li>Choose a new password. Your browser will decrypt your vault key locally and re-lock it with your new password without losing any entries.</li>
   </ol>
-  ${scriptOrigin ? `<script src="${htmlEscape(scriptOrigin)}/print-summary.js?v=5"></script>` : ""}
+  ${scriptOrigin ? `<script src="${htmlEscape(scriptOrigin)}/print-summary.js?v=6"></script>` : ""}
 </body>
 </html>`;
 
@@ -380,6 +380,6 @@ export function openPrintableRecoverySheet({ username = "", recoveryKey = "", se
   } else {
     URL.revokeObjectURL(url);
     const stamp = formatLocalDatePart(new Date()) || new Date().toISOString().slice(0, 10);
-    triggerDownload(`heyjournal-recovery-kit-${stamp}.html`, docHtml, "text/html;charset=utf-8");
+    triggerDownload(`heyjo-recovery-kit-${stamp}.html`, docHtml, "text/html;charset=utf-8");
   }
 }

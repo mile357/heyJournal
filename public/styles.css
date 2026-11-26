@@ -1,5 +1,5 @@
 /* ==========================================================================
-   HEYJOURNAL BASE STYLES & THEME TOKEN CONTRACT
+   HEYJO BASE STYLES & THEME TOKEN CONTRACT
    Maintains 100% token & structural parity with FamilyCoordination's 20-theme
    engine (`public/themes/<id>/theme.css`) while delivering a calm,
    "Content, Not Chrome" personal journaling & mental health tracking interface.
@@ -206,7 +206,7 @@ a {
   font-weight: var(--title-weight);
   line-height: 1.05;
   letter-spacing: var(--title-letter-spacing);
-  text-transform: var(--title-transform);
+  text-transform: none;
   color: var(--text-primary);
   white-space: nowrap;
   overflow: hidden;
@@ -691,9 +691,16 @@ a {
   min-width: 220px;
 }
 
+.input-actions-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
 .pinned-strip {
-  margin-top: 18px;
-  padding-top: 16px;
+  margin-top: 4px;
+  padding-top: 14px;
   border-top: 1px solid var(--border-color);
 }
 
@@ -786,7 +793,7 @@ a {
 }
 
 .inline-picker {
-  margin-top: 14px;
+  margin-top: 2px;
   padding: 14px;
   background: var(--bg-tile);
   border: 1px solid var(--border-color);
@@ -808,15 +815,10 @@ a {
   flex: 1 1 160px;
 }
 
-.input-footer {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin-top: 20px;
-  padding-top: 16px;
-  border-top: 1px solid var(--border-color);
+.input-crypto-note {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 2px;
 }
 
 /* ==========================================================================

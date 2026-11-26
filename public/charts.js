@@ -1,10 +1,10 @@
 /**
- * HeyJournal — Native Theme-Aware SVG Time-Series Chart Renderer
- * Zero external charting libraries. Uses HeyJournal / Metro semantic CSS tokens
+ * heyJo — Native Theme-Aware SVG Time-Series Chart Renderer
+ * Zero external charting libraries. Uses heyJo / Metro semantic CSS tokens
  * so charts automatically harmonize across all 20 themes (dark & light modes).
  */
 
-import { findSeverityBand } from "./quiz-engine.js?v=5";
+import { findSeverityBand } from "./quiz-engine.js?v=6";
 
 const RANGE_DAYS_MAP = {
   "30d": 30,

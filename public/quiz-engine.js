@@ -1,5 +1,5 @@
 /**
- * HeyJournal — Generalized Clinical Quiz Scoring Engine
+ * heyJo — Generalized Clinical Quiz Scoring Engine
  * Zero hard-coded quiz IDs: every quiz is driven purely by its JSON schema in `quizzes/*.json`.
  */
 

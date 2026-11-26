@@ -1,5 +1,5 @@
 /**
- * HeyJournal — Zero-Knowledge Client-Side Cryptography Engine
+ * heyJo — Zero-Knowledge Client-Side Cryptography Engine
  *
  * Dual-backend AES-256-GCM + PBKDF2-HMAC-SHA256 implementation:
  * 1. Uses native browser Web Crypto API (`crypto.subtle`) whenever available

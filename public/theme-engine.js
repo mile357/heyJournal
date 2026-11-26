@@ -1,9 +1,9 @@
 /**
- * HeyJournal — 20-Theme Engine & WCAG Contrast Contract
+ * heyJo — 20-Theme Engine & WCAG Contrast Contract
  * Directly compatible with FamilyCoordination's `public/themes/<id>/` format.
  */
 
-export const ASSET_VERSION = "5";
+export const ASSET_VERSION = "6";
 export const THEME_CACHE_KEY = "heyjournal_active_theme_cache_v1";
 
 export const METRO_ACCENTS = [
