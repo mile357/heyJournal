@@ -4,7 +4,7 @@
   "fullName": "Alcohol Use Disorders Identification Test",
   "category": "Substance & Habits",
   "shortDescription": "10-item WHO screening tool for tracking alcohol consumption patterns and risk over time.",
-  "timeframe": "Think about your alcohol use during the past year (one standard drink ≈ 12 oz beer, 5 oz wine, or 1.5 oz spirits):",
+  "timeframe": "Think about your alcohol use during the past year (1 WHO standard drink = 10 g pure alcohol; 1 US standard drink ≈ 14 g ≈ 12 oz 5% beer, 5 oz wine, or 1.5 oz spirits):",
   "estimatedMinutes": 2,
   "resourceUrl": "https://www.who.int/publications/i/item/WHO-MSD-MSB-01.6a",
   "resourceLabel": "WHO AUDIT Manual",
@@ -34,7 +34,7 @@
       "subscale": "consumption",
       "text": "How many standard drinks containing alcohol do you have on a typical day when you are drinking?",
       "options": [
-        { "label": "1 or 2", "value": 0 },
+        { "label": "0, 1, or 2 (or do not drink)", "value": 0 },
         { "label": "3 or 4", "value": 1 },
         { "label": "5 or 6", "value": 2 },
         { "label": "7 to 9", "value": 3 },
@@ -74,7 +74,7 @@
     "max": 40,
     "unit": "pts",
     "higherIsWorse": true,
-    "formulaDescription": "Sum of all 10 items (Q1–Q8 scored 0–4; Q9–Q10 scored 0, 2, or 4; range 0–40). WHO risk zones start at 8, 16, and 20.",
+    "formulaDescription": "Sum of all 10 items (Q1–Q8 scored 0–4; Q9–Q10 scored 0, 2, or 4; range 0–40). WHO risk zones start at 8, 16, and 20 (many guidelines use ≥6–7 for women and adults 65+). Note: WHO Q3's '6+ drinks' assumes 10 g WHO drinks (~4.3 US drinks). AUDIT-C positive screen is ≥3 for women and ≥4 for men.",
     "severityBands": [
       { "min": 0, "max": 7, "label": "Low Risk", "level": "low" },
       { "min": 8, "max": 15, "label": "Hazardous / Increasing Risk", "level": "moderate" },
@@ -82,7 +82,17 @@
       { "min": 20, "max": 40, "label": "Possible Dependence", "level": "severe" }
     ],
     "subscales": [
-      { "id": "consumption", "name": "AUDIT-C (Consumption)", "min": 0, "max": 12 },
+      {
+        "id": "consumption",
+        "name": "AUDIT-C (Consumption)",
+        "min": 0,
+        "max": 12,
+        "severityBands": [
+          { "min": 0, "max": 2, "label": "Low Risk", "level": "low" },
+          { "min": 3, "max": 3, "label": "Borderline (≥3 Women)", "level": "mild" },
+          { "min": 4, "max": 12, "label": "Elevated (≥4 Men / ≥3 Women)", "level": "moderate" }
+        ]
+      },
       { "id": "dependence", "name": "Dependence Symptoms", "min": 0, "max": 12 },
       { "id": "harm", "name": "Alcohol-Related Harm", "min": 0, "max": 16 }
     ]

@@ -3,7 +3,7 @@
  * All formatting happens strictly in the browser using already-decrypted data.
  */
 
-import { computeSeriesStats, filterPointsByRange } from "./charts.js?v=7";
+import { computeSeriesStats, filterPointsByRange } from "./charts.js?v=8";
 
 function formatLocalDatePart(date) {
   if (!(date instanceof Date) || Number.isNaN(date.getTime())) return "";
@@ -291,7 +291,7 @@ export function openPrintableClinicianSummary({
   <div class="disclaimer">
     Generated locally on the user's device from client-side decrypted heyJo records. Self-assessment scores are provided for longitudinal tracking and discussion with a qualified clinician and do not constitute a medical diagnosis.
   </div>
-  ${scriptOrigin ? `<script src="${htmlEscape(scriptOrigin)}/print-summary.js?v=7"></script>` : ""}
+  ${scriptOrigin ? `<script src="${htmlEscape(scriptOrigin)}/print-summary.js?v=8"></script>` : ""}
 </body>
 </html>`;
 
@@ -365,7 +365,7 @@ export function openPrintableRecoverySheet({ username = "", recoveryKey = "", se
     <li>Enter your username (<strong>${htmlEscape(username)}</strong>) and the 32-character key above.</li>
     <li>Choose a new password. Your browser will decrypt your vault key locally and re-lock it with your new password without losing any entries.</li>
   </ol>
-  ${scriptOrigin ? `<script src="${htmlEscape(scriptOrigin)}/print-summary.js?v=7"></script>` : ""}
+  ${scriptOrigin ? `<script src="${htmlEscape(scriptOrigin)}/print-summary.js?v=8"></script>` : ""}
 </body>
 </html>`;
 

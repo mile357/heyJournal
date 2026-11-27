@@ -22,7 +22,18 @@
     { "id": "q4", "text": "Trouble relaxing" },
     { "id": "q5", "text": "Being so restless that it is hard to sit still" },
     { "id": "q6", "text": "Becoming easily annoyed or irritable" },
-    { "id": "q7", "text": "Feeling afraid, as if something awful might happen" }
+    { "id": "q7", "text": "Feeling afraid, as if something awful might happen" },
+    {
+      "id": "q8",
+      "excludeFromTotal": true,
+      "text": "If you checked any problems, how difficult have they made it for you to do your work, take care of things at home, or get along with other people?",
+      "options": [
+        { "label": "Not difficult at all", "value": 0 },
+        { "label": "Somewhat difficult", "value": 1 },
+        { "label": "Very difficult", "value": 2 },
+        { "label": "Extremely difficult", "value": 3 }
+      ]
+    }
   ],
   "scoring": {
     "method": "sum",
@@ -30,7 +41,7 @@
     "max": 21,
     "unit": "pts",
     "higherIsWorse": true,
-    "formulaDescription": "Sum of all 7 items scored 0–3 each (range 0–21). Cutoffs at 5, 10, and 15 represent mild, moderate, and severe anxiety.",
+    "formulaDescription": "Sum of items Q1–Q7 scored 0–3 each (range 0–21); Q8 records functional impairment for clinical context without adding to the score. Cutoffs at 5, 10, and 15 represent mild, moderate, and severe anxiety.",
     "severityBands": [
       { "min": 0, "max": 4, "label": "Minimal", "level": "low" },
       { "min": 5, "max": 9, "label": "Mild", "level": "mild" },

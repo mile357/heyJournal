@@ -1,0 +1,44 @@
+{
+  "id": "sss-8",
+  "name": "SSS-8",
+  "fullName": "Somatic Symptom Scale-8",
+  "category": "Physical & Somatic Health",
+  "shortDescription": "8-item DSM-5 validated scale measuring past-week physical symptom burden (GI, pain, headaches, fatigue, sleep).",
+  "timeframe": "During the past 7 days, how much have you been bothered by any of the following problems?",
+  "estimatedMinutes": 2,
+  "resourceUrl": "https://pubmed.ncbi.nlm.nih.gov/24276929/",
+  "resourceLabel": "JAMA Internal Medicine SSS-8",
+  "citation": "Gierk B, Kohlmann S, Kroenke K, et al. JAMA Intern Med. 2014;174(3):399-407.",
+  "answerScale": [
+    { "label": "Not at all", "value": 0 },
+    { "label": "A little bit", "value": 1 },
+    { "label": "Somewhat", "value": 2 },
+    { "label": "Quite a bit", "value": 3 },
+    { "label": "Very much", "value": 4 }
+  ],
+  "questions": [
+    { "id": "q1", "text": "Stomach or bowel problems" },
+    { "id": "q2", "text": "Back pain" },
+    { "id": "q3", "text": "Pain in your arms, legs, or joints" },
+    { "id": "q4", "text": "Headaches" },
+    { "id": "q5", "text": "Chest pain or shortness of breath" },
+    { "id": "q6", "text": "Dizziness" },
+    { "id": "q7", "text": "Feeling tired or having low energy" },
+    { "id": "q8", "text": "Trouble sleeping" }
+  ],
+  "scoring": {
+    "method": "sum",
+    "min": 0,
+    "max": 32,
+    "unit": "pts",
+    "higherIsWorse": true,
+    "formulaDescription": "Sum of all 8 items scored 0–4 each (range 0–32). Gierk et al. (2014) percentile-based severity cutoffs: 0–3 No to Minimal, 4–7 Low, 8–11 Medium, 12–15 High, and 16–32 Very High somatic symptom burden.",
+    "severityBands": [
+      { "min": 0, "max": 3, "label": "No to Minimal", "level": "low" },
+      { "min": 4, "max": 7, "label": "Low Burden", "level": "mild" },
+      { "min": 8, "max": 11, "label": "Medium Burden", "level": "moderate" },
+      { "min": 12, "max": 15, "label": "High Burden", "level": "high" },
+      { "min": 16, "max": 32, "label": "Very High Burden", "level": "severe" }
+    ]
+  }
+}

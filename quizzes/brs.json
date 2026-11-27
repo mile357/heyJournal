@@ -1,0 +1,40 @@
+{
+  "id": "brs",
+  "name": "BRS",
+  "fullName": "Brief Resilience Scale",
+  "category": "Anxiety & Stress",
+  "shortDescription": "6-item public-domain scale measuring your ability to bounce back and recover from stress (higher is better).",
+  "timeframe": "Please indicate the extent to which you agree with each of the following statements:",
+  "estimatedMinutes": 1,
+  "resourceUrl": "https://pubmed.ncbi.nlm.nih.gov/18696313/",
+  "resourceLabel": "PubMed BRS Validation",
+  "citation": "Smith BW, Dalen J, Wiggins K, Tooley E, Christopher P, Bernard J. Int J Behav Med. 2008;15(3):194-200.",
+  "answerScale": [
+    { "label": "Strongly disagree", "value": 1 },
+    { "label": "Disagree", "value": 2 },
+    { "label": "Neutral", "value": 3 },
+    { "label": "Agree", "value": 4 },
+    { "label": "Strongly agree", "value": 5 }
+  ],
+  "questions": [
+    { "id": "q1", "text": "I tend to bounce back quickly after hard times." },
+    { "id": "q2", "reverse": true, "text": "I have a hard time making it through stressful events." },
+    { "id": "q3", "text": "It does not take me long to recover from a stressful event." },
+    { "id": "q4", "reverse": true, "text": "It is hard for me to snap back when something bad happens." },
+    { "id": "q5", "text": "I usually come through difficult times with little trouble." },
+    { "id": "q6", "reverse": true, "text": "I tend to take a long time to get over set-backs in my life." }
+  ],
+  "scoring": {
+    "method": "mean",
+    "min": 1,
+    "max": 5,
+    "unit": "/ 5",
+    "higherIsWorse": false,
+    "formulaDescription": "Negatively worded items (Q2, Q4, Q6) are reverse-scored (6 − value), then all 6 items are averaged (range 1.0–5.0). Per Smith et al. (2013), scores of 1.00–2.99 indicate Low Resilience, 3.00–4.30 Normal Resilience, and 4.31–5.00 High Resilience.",
+    "severityBands": [
+      { "min": 1, "max": 2.99, "label": "Low Resilience", "level": "severe" },
+      { "min": 3, "max": 4.3, "label": "Normal Resilience", "level": "mild" },
+      { "min": 4.31, "max": 5, "label": "High Resilience", "level": "low" }
+    ]
+  }
+}

@@ -3,7 +3,7 @@
  * Directly compatible with FamilyCoordination's `public/themes/<id>/` format.
  */
 
-export const ASSET_VERSION = "7";
+export const ASSET_VERSION = "8";
 export const THEME_CACHE_KEY = "heyjournal_active_theme_cache_v1";
 
 export const METRO_ACCENTS = [

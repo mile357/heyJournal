@@ -3,7 +3,7 @@
   "name": "MDQ",
   "fullName": "Mood Disorder Questionnaire",
   "category": "Mood & Depression",
-  "shortDescription": "13-item bipolar spectrum symptom checklist plus co-occurrence and impact context.",
+  "shortDescription": "13-item lifetime bipolar spectrum screener plus co-occurrence and functional impact criteria.",
   "timeframe": "Has there ever been a period of time when you were not your usual self and...",
   "estimatedMinutes": 3,
   "resourceUrl": "https://www.ohsu.edu/sites/default/files/2019-06/cms-quality-bipolar_disorder_mdq_screener.pdf",
@@ -54,12 +54,23 @@
     "max": 13,
     "unit": "yes",
     "higherIsWorse": true,
-    "formulaDescription": "Count of 'Yes' responses across the 13 core mood-elevation symptoms (range 0–13). Standard positive clinical screen requires ≥7 core symptoms, co-occurrence (Q14 = Yes), and moderate/serious impact (Q15 ≥ 2).",
+    "formulaDescription": "Lifetime screener (not a weekly mood tracker). Counts 'Yes' responses across the 13 core mood-elevation symptoms (0–13). Per Hirschfeld et al. (2000), a positive clinical screen requires ALL THREE criteria: ≥7 core symptoms (Q1–Q13), co-occurrence during the same period (Q14 = Yes), and moderate or serious problem severity (Q15 ≥ 2).",
+    "screeningRule": {
+      "allOf": [
+        { "target": "score", "min": 7 },
+        { "questionId": "q14", "min": 1 },
+        { "questionId": "q15", "min": 2 }
+      ],
+      "partialAllOf": [
+        { "target": "score", "min": 7 }
+      ],
+      "positiveBand": { "label": "Positive Screen", "level": "high" },
+      "partialBand": { "label": "Negative Screen (Criteria Incomplete)", "level": "mild" },
+      "negativeBand": { "label": "Negative Screen", "level": "low" }
+    },
     "severityBands": [
-      { "min": 0, "max": 3, "label": "Low Symptom Count", "level": "low" },
-      { "min": 4, "max": 6, "label": "Below Screen Threshold", "level": "mild" },
-      { "min": 7, "max": 10, "label": "Elevated (≥7 Threshold)", "level": "moderate" },
-      { "min": 11, "max": 13, "label": "High Symptom Count", "level": "severe" }
+      { "min": 0, "max": 6, "label": "Below Symptom Threshold (<7)", "level": "low" },
+      { "min": 7, "max": 13, "label": "Symptom Threshold Met (≥7; Check Q14 & Q15)", "level": "moderate" }
     ]
   }
 }

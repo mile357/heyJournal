@@ -1,0 +1,141 @@
+{
+  "id": "tfeq-r18",
+  "name": "TFEQ-R18",
+  "fullName": "Three-Factor Eating Questionnaire – Revised 18",
+  "category": "Nutrition & Diet",
+  "shortDescription": "18-item validated scale measuring Cognitive Restraint, Uncontrolled Eating, and Emotional Eating (0–100% subscales).",
+  "timeframe": "Read each statement and choose the option that best describes your usual eating behavior:",
+  "estimatedMinutes": 4,
+  "resourceUrl": "https://pubmed.ncbi.nlm.nih.gov/11126224/",
+  "resourceLabel": "PubMed TFEQ-R18 Validation",
+  "citation": "Karlsson J, Persson LO, Sjöström L, Sullivan M. Int J Obes Relat Metab Disord. 2000;24(12):1715-1725.",
+  "answerScale": [
+    { "label": "Definitely false", "value": 1 },
+    { "label": "Mostly false", "value": 2 },
+    { "label": "Mostly true", "value": 3 },
+    { "label": "Definitely true", "value": 4 }
+  ],
+  "questions": [
+    { "id": "q1", "subscale": "uncontrolled-eating", "text": "When I smell a sizzling steak or juicy piece of meat, I find it very difficult to keep from eating, even if I have just finished a meal." },
+    { "id": "q2", "subscale": "cognitive-restraint", "text": "I deliberately take small helpings as a means of controlling my weight." },
+    { "id": "q3", "subscale": "emotional-eating", "text": "When I feel anxious, I find myself eating." },
+    { "id": "q4", "subscale": "uncontrolled-eating", "text": "Sometimes when I start eating, I just can't seem to stop." },
+    { "id": "q5", "subscale": "uncontrolled-eating", "text": "Being with someone who is eating often makes me hungry enough to eat also." },
+    { "id": "q6", "subscale": "emotional-eating", "text": "When I feel blue, I often overeat." },
+    { "id": "q7", "subscale": "uncontrolled-eating", "text": "When I see a real delicacy, I often get so hungry that I have to eat right away." },
+    { "id": "q8", "subscale": "uncontrolled-eating", "text": "I get so hungry that my stomach often seems like a bottomless pit." },
+    { "id": "q9", "subscale": "uncontrolled-eating", "text": "I am always hungry so it is hard for me to stop eating before I finish the food on my plate." },
+    { "id": "q10", "subscale": "emotional-eating", "text": "When I feel lonely, I console myself by eating." },
+    { "id": "q11", "subscale": "cognitive-restraint", "text": "I consciously hold back at meals in order not to gain weight." },
+    { "id": "q12", "subscale": "cognitive-restraint", "text": "I do not eat some foods because they make me fat." },
+    { "id": "q13", "subscale": "uncontrolled-eating", "text": "I am always hungry enough to eat at any time." },
+    {
+      "id": "q14",
+      "subscale": "uncontrolled-eating",
+      "text": "How often do you feel hungry?",
+      "options": [
+        { "label": "Only at meal times", "value": 1 },
+        { "label": "Sometimes between meals", "value": 2 },
+        { "label": "Often between meals", "value": 3 },
+        { "label": "Almost always", "value": 4 }
+      ]
+    },
+    {
+      "id": "q15",
+      "subscale": "cognitive-restraint",
+      "text": "How frequently do you avoid 'stocking up' on tempting foods?",
+      "options": [
+        { "label": "Almost never", "value": 1 },
+        { "label": "Seldom", "value": 2 },
+        { "label": "Usually", "value": 3 },
+        { "label": "Almost always", "value": 4 }
+      ]
+    },
+    {
+      "id": "q16",
+      "subscale": "cognitive-restraint",
+      "text": "How likely are you to consciously eat less than you want?",
+      "options": [
+        { "label": "Unlikely", "value": 1 },
+        { "label": "Slightly likely", "value": 2 },
+        { "label": "Moderately likely", "value": 3 },
+        { "label": "Very likely", "value": 4 }
+      ]
+    },
+    {
+      "id": "q17",
+      "subscale": "uncontrolled-eating",
+      "text": "Do you go on eating binges though you are not hungry?",
+      "options": [
+        { "label": "Never", "value": 1 },
+        { "label": "Rarely", "value": 2 },
+        { "label": "Sometimes", "value": 3 },
+        { "label": "At least once a week", "value": 4 }
+      ]
+    },
+    {
+      "id": "q18",
+      "subscale": "cognitive-restraint",
+      "text": "On a scale of 1 to 8, where 1 means no restraint in eating (eating whatever you want, whenever you want it) and 8 means total restraint (constantly limiting food intake and never 'giving in'), what number would you give yourself?",
+      "options": [
+        { "label": "1–2 (No / very little restraint)", "value": 1 },
+        { "label": "3–4 (Mild restraint)", "value": 2 },
+        { "label": "5–6 (Moderate restraint)", "value": 3 },
+        { "label": "7–8 (High / total restraint)", "value": 4 }
+      ]
+    }
+  ],
+  "scoring": {
+    "method": "percentage",
+    "min": 0,
+    "max": 100,
+    "unit": "%",
+    "higherIsWorse": true,
+    "bandStrategy": "highestSubscale",
+    "formulaDescription": "Each domain is linearly transformed to a 0–100% scale: ((raw − min) / (max − min)) × 100 per Karlsson et al. (2000). Interpret subscales individually: higher Uncontrolled Eating and Emotional Eating reflect stronger cue/mood-driven overeating, while moderate Cognitive Restraint can be neutral or intentional.",
+    "severityBands": [
+      { "min": 0, "max": 100, "label": "Interpret by Subscale", "level": "mild" }
+    ],
+    "subscales": [
+      {
+        "id": "cognitive-restraint",
+        "name": "Cognitive Restraint",
+        "method": "percentage",
+        "min": 0,
+        "max": 100,
+        "unit": "%",
+        "severityBands": [
+          { "min": 0, "max": 33, "label": "Low Restraint", "level": "low" },
+          { "min": 34, "max": 66, "label": "Moderate Restraint", "level": "mild" },
+          { "min": 67, "max": 100, "label": "High Restraint", "level": "moderate" }
+        ]
+      },
+      {
+        "id": "uncontrolled-eating",
+        "name": "Uncontrolled Eating",
+        "method": "percentage",
+        "min": 0,
+        "max": 100,
+        "unit": "%",
+        "severityBands": [
+          { "min": 0, "max": 33, "label": "Low", "level": "low" },
+          { "min": 34, "max": 66, "label": "Moderate", "level": "moderate" },
+          { "min": 67, "max": 100, "label": "High", "level": "high" }
+        ]
+      },
+      {
+        "id": "emotional-eating",
+        "name": "Emotional Eating",
+        "method": "percentage",
+        "min": 0,
+        "max": 100,
+        "unit": "%",
+        "severityBands": [
+          { "min": 0, "max": 33, "label": "Low", "level": "low" },
+          { "min": 34, "max": 66, "label": "Moderate", "level": "moderate" },
+          { "min": 67, "max": 100, "label": "High", "level": "high" }
+        ]
+      }
+    ]
+  }
+}

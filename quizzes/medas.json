@@ -1,0 +1,45 @@
+{
+  "id": "medas",
+  "name": "MEDAS",
+  "fullName": "Mediterranean Diet Adherence Screener (14-Item PREDIMED)",
+  "category": "Nutrition & Diet",
+  "shortDescription": "14-item PREDIMED screener measuring adherence to a cardiovascular-protective Mediterranean diet (higher is better).",
+  "timeframe": "Thinking about your typical eating habits over the past few weeks, answer Yes or No to each dietary criterion:",
+  "estimatedMinutes": 3,
+  "resourceUrl": "https://pubmed.ncbi.nlm.nih.gov/21508208/",
+  "resourceLabel": "PubMed PREDIMED MEDAS",
+  "citation": "Schröder H, Fitó M, Estruch R, et al. J Nutr. 2011;141(6):1140-1145.",
+  "answerScale": [
+    { "label": "No", "value": 0 },
+    { "label": "Yes", "value": 1 }
+  ],
+  "questions": [
+    { "id": "q1", "text": "Do you use olive oil as your main culinary fat?" },
+    { "id": "q2", "text": "Do you consume 4 or more tablespoons of olive oil in a given day (including frying, salads, and meals eaten away from home)?" },
+    { "id": "q3", "text": "Do you consume 2 or more servings of vegetables per day (1 serving ≈ 200 g / 1 cup cooked or 2 cups raw, with at least 1 portion raw or as salad)?" },
+    { "id": "q4", "text": "Do you consume 3 or more fruit units per day (including freshly squeezed natural fruit juices)?" },
+    { "id": "q5", "text": "Do you consume less than 1 serving of red meat, hamburger, or meat products (ham, sausage, etc.) per day (1 serving ≈ 100–150 g)?" },
+    { "id": "q6", "text": "Do you consume less than 1 serving of butter, margarine, or cream per day (1 serving ≈ 12 g / 1 tablespoon)?" },
+    { "id": "q7", "text": "Do you consume less than 1 sweet or carbonated sugar-sweetened beverage per day?" },
+    { "id": "q8", "text": "Do you drink 7 or more glasses of wine per week? (Original PREDIMED item — see clinical note below)" },
+    { "id": "q9", "text": "Do you consume 3 or more servings of legumes (beans, lentils, chickpeas) per week (1 serving ≈ 150 g cooked)?" },
+    { "id": "q10", "text": "Do you consume 3 or more servings of fish or shellfish per week (1 serving ≈ 100–150 g fish or 4–5 pieces shellfish)?" },
+    { "id": "q11", "text": "Do you consume commercial sweets or pastries (not homemade), such as cakes, cookies, biscuits, or custard, fewer than 3 times per week?" },
+    { "id": "q12", "text": "Do you consume 3 or more servings of nuts (including peanuts) per week (1 serving ≈ 30 g / a small handful)?" },
+    { "id": "q13", "text": "Do you preferentially consume chicken, turkey, or rabbit meat instead of veal, pork, hamburger, or sausage?" },
+    { "id": "q14", "text": "Do you consume vegetables, pasta, rice, or other dishes seasoned with sofrito (sauce made with tomato and onion, leek, or garlic simmered in olive oil) 2 or more times per week?" }
+  ],
+  "scoring": {
+    "method": "sum",
+    "min": 0,
+    "max": 14,
+    "unit": "pts",
+    "higherIsWorse": false,
+    "formulaDescription": "Count of met criteria across all 14 items (range 0–14). Per PREDIMED (Schröder et al., 2011), scores ≤5 indicate low adherence, 6–9 moderate adherence, and ≥10 high adherence. Clinical note: while original PREDIMED Q8 awards 1 point for ≥7 glasses of wine/week, current WHO & AHA guidance recognizes no risk-free level of alcohol — non-drinkers should not begin drinking to increase this score.",
+    "severityBands": [
+      { "min": 0, "max": 5, "label": "Low Adherence", "level": "severe" },
+      { "min": 6, "max": 9, "label": "Moderate Adherence", "level": "moderate" },
+      { "min": 10, "max": 14, "label": "High Adherence", "level": "low" }
+    ]
+  }
+}

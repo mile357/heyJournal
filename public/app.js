@@ -19,10 +19,10 @@ import {
   normalizeRecoveryKey,
   unwrapDek,
   wrapDek,
-} from "./crypto.js?v=7";
+} from "./crypto.js?v=8";
 
-import { findSeverityBand, formatScoreValue, getQuestionOptions, scoreQuiz } from "./quiz-engine.js?v=7";
-import { computeSeriesStats, filterPointsByRange, renderMetricChart } from "./charts.js?v=7";
+import { findSeverityBand, formatScoreValue, getQuestionOptions, scoreQuiz } from "./quiz-engine.js?v=8";
+import { computeSeriesStats, filterPointsByRange, renderMetricChart } from "./charts.js?v=8";
 import {
   ASSET_VERSION,
   ThemeRegistry,
@@ -33,13 +33,13 @@ import {
   getEffectiveThemeMode,
   getThemeAccents,
   sanitizeColor,
-} from "./theme-engine.js?v=7";
+} from "./theme-engine.js?v=8";
 import {
   downloadDecryptedCsv,
   downloadDecryptedJson,
   openPrintableClinicianSummary,
   openPrintableRecoverySheet,
-} from "./export.js?v=7";
+} from "./export.js?v=8";
 
 const SESSION_DEK_KEY = "heyjournal_session_dek_v1";
 const STAY_UNLOCKED_PREF_KEY = "heyjournal_stay_unlocked_pref_v1";
@@ -2975,7 +2975,11 @@ function renderQuizRunnerPanel(panel) {
                     <div class="subscale-card">
                       <div style="font-size:12px; color:var(--text-secondary);">${escapeHtml(sub.name)}</div>
                       <div style="font-size:20px; font-weight:500; margin-top:2px;">
-                        ${escapeHtml(String(sub.score))}${sub.max ? `<span style="font-size:12px; color:var(--text-muted);"> / ${escapeHtml(String(sub.max))}</span>` : ""}
+                        ${
+                          sub.unit === "%"
+                            ? escapeHtml(formatScoreValue(sub.score, "%"))
+                            : `${escapeHtml(formatScoreValue(sub.score, ""))}${sub.max ? `<span style="font-size:12px; color:var(--text-muted);"> / ${escapeHtml(String(sub.max))}</span>` : ""}`
+                        }
                       </div>
                       ${sub.band ? `<div style="font-size:11px; color:var(--accent-text); margin-top:2px;">${escapeHtml(sub.band.label)}</div>` : ""}
                     </div>
@@ -3229,7 +3233,11 @@ function renderQuizBreakdownPanel(panel) {
                   <div class="subscale-card">
                     <div style="font-size:12px; color:var(--text-secondary);">${escapeHtml(sub.name)}</div>
                     <div style="font-size:18px; font-weight:500; margin-top:2px;">
-                      ${escapeHtml(String(sub.score))}${sub.max ? `<span style="font-size:12px; color:var(--text-muted);"> / ${escapeHtml(String(sub.max))}</span>` : ""}
+                      ${
+                        sub.unit === "%"
+                          ? escapeHtml(formatScoreValue(sub.score, "%"))
+                          : `${escapeHtml(formatScoreValue(sub.score, ""))}${sub.max ? `<span style="font-size:12px; color:var(--text-muted);"> / ${escapeHtml(String(sub.max))}</span>` : ""}`
+                      }
                     </div>
                     ${sub.band ? `<div style="font-size:11px; color:var(--accent-text);">${escapeHtml(sub.band.label)}</div>` : ""}
                   </div>

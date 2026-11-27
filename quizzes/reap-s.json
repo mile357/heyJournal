@@ -1,0 +1,52 @@
+{
+  "id": "reap-s",
+  "name": "REAP-S",
+  "fullName": "Rapid Eating Assessment for Participants – Shortened",
+  "category": "Nutrition & Diet",
+  "shortDescription": "13-item primary-care dietary quality screener tracking everyday nutrition habits (higher is healthier).",
+  "timeframe": "In an average week, how often do you:",
+  "estimatedMinutes": 3,
+  "resourceUrl": "https://pubmed.ncbi.nlm.nih.gov/15357331/",
+  "resourceLabel": "PubMed REAP-S Study",
+  "citation": "Segal-Isaacson CJ, Wylie-Rosett J, Gans KM. Diabetes Educ. 2004;30(5):774-781; Johnston CS, et al. Nutrients. 2018;10(8):1095.",
+  "answerScale": [
+    { "label": "Usually / Often", "value": 1 },
+    { "label": "Sometimes", "value": 2 },
+    { "label": "Rarely / Never (or Does not apply)", "value": 3 }
+  ],
+  "questions": [
+    { "id": "q1", "subscale": "meal-patterns", "text": "Skip breakfast?" },
+    { "id": "q2", "subscale": "meal-patterns", "text": "Eat 4 or more meals from sit-down or take-out restaurants?" },
+    { "id": "q3", "subscale": "core-foods", "text": "Eat less than 2 servings of whole grain products or high-fiber starches a day? (Serving = 1 slice 100% whole grain bread, 1 cup whole grain cereal/oatmeal, 3–4 whole grain crackers, or ½ cup brown rice/whole wheat pasta)" },
+    { "id": "q4", "subscale": "core-foods", "text": "Eat less than 2 servings of fruit a day? (Serving = ½ cup or 1 medium fruit, or 4 oz 100% fruit juice)" },
+    { "id": "q5", "subscale": "core-foods", "text": "Eat less than 2 servings of vegetables a day? (Serving = ½ cup cooked vegetables or 1 cup raw leafy vegetables)" },
+    { "id": "q6", "subscale": "core-foods", "text": "Eat or drink less than 2 servings of milk, yogurt, or cheese a day? (Serving = 1 cup milk/yogurt or 1½–2 oz cheese)" },
+    { "id": "q7", "subscale": "fats-proteins", "text": "Eat more than 8 ounces of meat, chicken, turkey, or fish per day? (3 oz ≈ size of a deck of cards)" },
+    { "id": "q8", "subscale": "fats-proteins", "text": "Use regular processed meats (like bologna, salami, corned beef, hot dogs, sausage, or bacon) instead of low-fat processed meats (like roast beef, turkey, or lean ham)?" },
+    { "id": "q9", "subscale": "fats-proteins", "text": "Eat fried foods such as fried chicken, fried fish, French fries, fried plantains, or fried yuca?" },
+    { "id": "q10", "subscale": "snacks-sweets", "text": "Eat regular potato chips, nacho chips, corn chips, crackers, or regular popcorn instead of pretzels, low-fat chips/crackers, or air-popped popcorn?" },
+    { "id": "q11", "subscale": "fats-proteins", "text": "Add butter, margarine, or oil to bread, potatoes, rice, or vegetables at the table?" },
+    { "id": "q12", "subscale": "snacks-sweets", "text": "Eat sweets like cake, cookies, pastries, donuts, muffins, chocolate, and candies more than 2 times per day?" },
+    { "id": "q13", "subscale": "snacks-sweets", "text": "Drink 16 ounces or more of non-diet soda, fruit drink/punch, or sweetened beverages per day?" }
+  ],
+  "scoring": {
+    "method": "sum",
+    "min": 13,
+    "max": 39,
+    "unit": "pts",
+    "higherIsWorse": false,
+    "formulaDescription": "Sum of all 13 dietary items (Usually/Often = 1, Sometimes = 2, Rarely/Never or Does not apply = 3; range 13–39). Higher scores indicate higher overall diet quality (mean ~32 in healthy adult cohorts).",
+    "severityBands": [
+      { "min": 13, "max": 24, "label": "Lower Diet Quality", "level": "severe" },
+      { "min": 25, "max": 30, "label": "Moderate Diet Quality", "level": "moderate" },
+      { "min": 31, "max": 34, "label": "Good Diet Quality", "level": "mild" },
+      { "min": 35, "max": 39, "label": "High Diet Quality", "level": "low" }
+    ],
+    "subscales": [
+      { "id": "meal-patterns", "name": "Meal Patterns", "min": 2, "max": 6 },
+      { "id": "core-foods", "name": "Whole Grains, Produce & Dairy", "min": 4, "max": 12 },
+      { "id": "fats-proteins", "name": "Meats, Fried & Added Fats", "min": 4, "max": 12 },
+      { "id": "snacks-sweets", "name": "Snacks, Sweets & Sugary Drinks", "min": 3, "max": 9 }
+    ]
+  }
+}

@@ -45,13 +45,10 @@
     "max": 126,
     "unit": "pts",
     "higherIsWorse": true,
-    "formulaDescription": "Each 7-item subscale (Depression, Anxiety, Stress) is summed and multiplied by 2 to match full DASS-42 norms (0–42 per subscale; 0–126 total distress).",
+    "formulaDescription": "Each 7-item subscale (Depression, Anxiety, Stress) is summed and multiplied by 2 to match DASS-42 norms (0–42 each). Per Lovibond & Lovibond (1995), severity bands apply to each subscale individually rather than the 0–126 composite total; the headline badge reflects the highest subscale severity.",
+    "bandStrategy": "highestSubscale",
     "severityBands": [
-      { "min": 0, "max": 30, "label": "Normal", "level": "low" },
-      { "min": 31, "max": 48, "label": "Mild", "level": "mild" },
-      { "min": 49, "max": 68, "label": "Moderate", "level": "moderate" },
-      { "min": 69, "max": 88, "label": "Severe", "level": "high" },
-      { "min": 89, "max": 126, "label": "Extremely Severe", "level": "severe" }
+      { "min": 0, "max": 126, "label": "Interpret by Subscale", "level": "mild" }
     ],
     "subscales": [
       {
@@ -95,6 +92,13 @@
           { "min": 26, "max": 33, "label": "Severe", "level": "high" },
           { "min": 34, "max": 42, "label": "Extremely Severe", "level": "severe" }
         ]
+      }
+    ],
+    "safetyFlags": [
+      {
+        "questionId": "q21",
+        "minValue": 2,
+        "message": "You indicated feeling that life was meaningless a considerable part or most of the past week. If you are experiencing deep hopelessness or thoughts of self-harm, consider reaching out to a trusted person, healthcare provider, or calling/texting 988 (US & Canada Suicide & Crisis Lifeline)."
       }
     ]
   }

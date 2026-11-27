@@ -36,7 +36,7 @@
     "max": 100,
     "unit": "%",
     "higherIsWorse": true,
-    "formulaDescription": "Simple WHO scoring: sum of 12 items (0–4 each, max 48) converted to a 0–100% disability index ((sum / 48) × 100). Lower percentages indicate higher daily functioning.",
+    "formulaDescription": "Simple WHO scoring: sum of 12 items (0–4 each, max 48) converted to a 0–100% disability index ((sum / 48) × 100). Lower percentages indicate higher daily functioning. Note: WHO validates standalone domain scores only on the 36-item version; the 2-item domain subscales here serve as informal indicators.",
     "severityBands": [
       { "min": 0, "max": 4, "label": "None", "level": "low" },
       { "min": 5, "max": 24, "label": "Mild", "level": "mild" },

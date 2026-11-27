@@ -4,7 +4,7 @@
  * so charts automatically harmonize across all 20 themes (dark & light modes).
  */
 
-import { findSeverityBand } from "./quiz-engine.js?v=7";
+import { findSeverityBand } from "./quiz-engine.js?v=8";
 
 const RANGE_DAYS_MAP = {
   "30d": 30,

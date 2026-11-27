@@ -1,0 +1,46 @@
+{
+  "id": "fss",
+  "name": "FSS",
+  "fullName": "Fatigue Severity Scale",
+  "category": "Pain & Fatigue",
+  "shortDescription": "9-item clinical scale assessing how fatigue impacts physical functioning, motivation, and daily life.",
+  "timeframe": "During the past week, indicate how much you agree with each statement (1 = Strongly disagree, 7 = Strongly agree):",
+  "estimatedMinutes": 2,
+  "resourceUrl": "https://pubmed.ncbi.nlm.nih.gov/2803071/",
+  "resourceLabel": "PubMed FSS Study",
+  "citation": "Krupp LB, LaRocca NG, Muir-Nash J, Steinberg AD. Arch Neurol. 1989;46(10):1121-1123.",
+  "answerScale": [
+    { "label": "1 — Strongly disagree", "value": 1 },
+    { "label": "2 — Disagree", "value": 2 },
+    { "label": "3 — Somewhat disagree", "value": 3 },
+    { "label": "4 — Neither agree nor disagree", "value": 4 },
+    { "label": "5 — Somewhat agree", "value": 5 },
+    { "label": "6 — Agree", "value": 6 },
+    { "label": "7 — Strongly agree", "value": 7 }
+  ],
+  "questions": [
+    { "id": "q1", "text": "My motivation is lower when I am fatigued." },
+    { "id": "q2", "text": "Exercise brings on my fatigue." },
+    { "id": "q3", "text": "I am easily fatigued." },
+    { "id": "q4", "text": "Fatigue interferes with my physical functioning." },
+    { "id": "q5", "text": "Fatigue causes frequent problems for me." },
+    { "id": "q6", "text": "My fatigue prevents sustained physical functioning." },
+    { "id": "q7", "text": "Fatigue interferes with carrying out certain duties and responsibilities." },
+    { "id": "q8", "text": "Fatigue is among my three most disabling symptoms." },
+    { "id": "q9", "text": "Fatigue interferes with my work, family, or social life." }
+  ],
+  "scoring": {
+    "method": "mean",
+    "min": 1,
+    "max": 7,
+    "unit": "/ 7",
+    "higherIsWorse": true,
+    "formulaDescription": "Mean of all 9 items rated 1–7 (range 1.0–7.0; equivalent to total sum 9–63 divided by 9). A mean score of 4.0 or higher (sum ≥36) is the standard clinical cutoff indicating significant fatigue; scores ≥5.0 reflect high/severe fatigue.",
+    "severityBands": [
+      { "min": 1, "max": 3.99, "label": "Normal / Low Fatigue", "level": "low" },
+      { "min": 4, "max": 4.99, "label": "Clinically Significant Fatigue", "level": "moderate" },
+      { "min": 5, "max": 5.99, "label": "High Fatigue", "level": "high" },
+      { "min": 6, "max": 7, "label": "Severe Fatigue", "level": "severe" }
+    ]
+  }
+}

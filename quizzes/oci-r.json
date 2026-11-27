@@ -8,7 +8,7 @@
   "estimatedMinutes": 4,
   "resourceUrl": "https://www.apa.org/pi/about/publications/caregivers/practice-settings/assessment/tools/oci-r",
   "resourceLabel": "OCI-R Overview",
-  "citation": "Foa EB, Huppert JD, Leiberg S, et al. Psychol Assess. 2002;14(4):485-496.",
+  "citation": "Foa EB, Huppert JD, Leiberg S, et al. Psychol Assess. 2002;14(4):485-496; Abramovitch A, et al. J Obsessive Compuls Relat Disord. 2020;27:100557.",
   "answerScale": [
     { "label": "Not at all", "value": 0 },
     { "label": "A little", "value": 1 },
@@ -42,13 +42,11 @@
     "max": 72,
     "unit": "pts",
     "higherIsWorse": true,
-    "formulaDescription": "Sum of all 18 items scored 0–4 each (range 0–72), plus six 3-item subscales (0–12 each). A total score of 21 or higher is the standard clinical screening threshold for likely OCD.",
+    "formulaDescription": "Sum of all 18 items scored 0–4 each (range 0–72), plus six 3-item subscales (0–12 each). Per Foa et al. (2002), a total score ≥21 is the optimal clinical screening threshold for likely OCD. Severity bands reflect Abramovitch et al. (2020) Y-BOCS benchmarks (0–15 Mild, 16–27 Moderate, 28–72 Severe).",
     "severityBands": [
-      { "min": 0, "max": 15, "label": "Minimal", "level": "low" },
-      { "min": 16, "max": 20, "label": "Subthreshold", "level": "mild" },
-      { "min": 21, "max": 35, "label": "Moderate (Clinical Range)", "level": "moderate" },
-      { "min": 36, "max": 50, "label": "High", "level": "high" },
-      { "min": 51, "max": 72, "label": "Severe", "level": "severe" }
+      { "min": 0, "max": 15, "label": "Mild", "level": "low" },
+      { "min": 16, "max": 27, "label": "Moderate (Screen Cutoff ≥21)", "level": "moderate" },
+      { "min": 28, "max": 72, "label": "Severe", "level": "severe" }
     ],
     "subscales": [
       { "id": "washing", "name": "Washing", "min": 0, "max": 12 },

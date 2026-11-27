@@ -2,9 +2,9 @@
   "id": "pcl-5",
   "name": "PCL-5",
   "fullName": "PTSD Checklist for DSM-5",
-  "category": "Trauma & Focus",
+  "category": "Trauma & PTSD",
   "shortDescription": "20-item VA National Center for PTSD self-report scale tracking DSM-5 trauma symptoms.",
-  "timeframe": "In the past month, how much were you bothered by:",
+  "timeframe": "Keeping a specific very stressful or traumatic experience in mind, how much were you bothered by each problem in the past month?",
   "estimatedMinutes": 5,
   "resourceUrl": "https://www.ptsd.va.gov/professional/assessment/adult-sr/ptsd-checklist.asp",
   "resourceLabel": "VA National Center for PTSD",
@@ -44,7 +44,7 @@
     "max": 80,
     "unit": "pts",
     "higherIsWorse": true,
-    "formulaDescription": "Sum of all 20 items scored 0–4 each (range 0–80). A score of 31–33 or higher is a widely used cutoff indicating probable PTSD; a 5–10 point change is typically reliable clinically.",
+    "formulaDescription": "Sum of all 20 items scored 0–4 each (range 0–80). A total score of 31–33+ indicates probable PTSD (a 5–10 pt change is reliable; 10–20 pts clinically meaningful). DSM-5 provisional criteria also look for items rated ≥2 ('Moderately'): ≥1 Intrusion (B), ≥1 Avoidance (C), ≥2 Cognition & Mood (D), and ≥2 Arousal (E). Multi-tier bands above 31 are descriptive.",
     "severityBands": [
       { "min": 0, "max": 15, "label": "Minimal", "level": "low" },
       { "min": 16, "max": 30, "label": "Subthreshold", "level": "mild" },
@@ -57,6 +57,13 @@
       { "id": "avoidance", "name": "Cluster C: Avoidance", "min": 0, "max": 8 },
       { "id": "cognition-mood", "name": "Cluster D: Cognition & Mood", "min": 0, "max": 28 },
       { "id": "arousal", "name": "Cluster E: Arousal & Reactivity", "min": 0, "max": 24 }
+    ],
+    "safetyFlags": [
+      {
+        "questionId": "q16",
+        "minValue": 3,
+        "message": "You indicated taking significant risks or doing things that could cause you harm. If you feel unsafe or overwhelmed, consider reaching out to a trusted person, clinician, or calling/texting 988 (US & Canada Crisis Lifeline)."
+      }
     ]
   }
 }

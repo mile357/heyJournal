@@ -62,12 +62,15 @@ No core application files need to be edited to add a new quiz.
 
 ### Supported Scoring Fields
 - **`scoring.method`**:
-  - `"sum"` *(default)*: Sums all answered question values (applying per-question `reverse: true` as `maxOptionValue - value`, then multiplying by `scoring.multiplier`, default `1`). Questions with `excludeFromTotal: true` are recorded for clinical context without adding to the primary numeric score.
-  - `"percentage"`: Computes `Math.round((rawSum / rawMax) * 100)` on a `0–100` scale.
-- **`question.options`** *(optional)*: Overrides the quiz-wide `answerScale` for a specific question (used in quizzes like AUDIT or MDQ where later questions have different answer choices).
+  - `"sum"` *(default)*: Sums all answered question values (applying per-question `reverse: true` as `maxOptionValue + minOptionValue - value`, then multiplying by `scoring.multiplier`, default `1`). Questions with `excludeFromTotal: true` are recorded for clinical context without adding to the primary numeric score.
+  - `"mean"`: Computes the arithmetic mean of answered non-excluded items (applying `reverse: true` and optional `multiplier`). Used by scales like PEG (`0–10`), BRS (`1–5`), FSS (`1–7`), and CBI (`0–100%`).
+  - `"percentage"`: Computes `Math.round(((rawSum - rawMin) / (rawMax - rawMin)) * 100)` on a `0–100` scale.
+- **`question.options`** *(optional)*: Overrides the quiz-wide `answerScale` for a specific question (used in quizzes like AUDIT, MDQ, CBI, or TFEQ-R18 where specific questions have different answer choices).
 - **`scoring.severityBands`**: Ordered `{ min, max, label, level }` ranges (`level`: `"low" | "mild" | "moderate" | "high" | "severe"`). Used both for the post-quiz result badge and horizontal clinical reference bands on **Report** charts.
-- **`scoring.subscales`** *(optional)*: Named subscale definitions that sum matching `question.subscale` items (or explicit `questionIds`), each with optional `multiplier`, `min`, `max`, and `severityBands`.
-- **`scoring.higherIsWorse`**: Set `false` for positive well-being scales (like WHO-5) so trend deltas and chart colors reflect improvement accurately.
+- **`scoring.bandStrategy`** *(optional)*: Defaults to `"score"`. Set `"highestSubscale"` on multi-dimensional scales without official composite bands (such as DASS-21 or TFEQ-R18) so the headline badge reflects the most elevated subscale instead of masking single-domain severity.
+- **`scoring.screeningRule`** *(optional)*: Declarative conjunction (`allOf`, optional `partialAllOf`, `positiveBand`, `partialBand`, `negativeBand`) over `score`, `questionId`, or `subscaleId` min/max conditions (used by multi-criterion screeners like MDQ).
+- **`scoring.subscales`** *(optional)*: Named subscale definitions matching `question.subscale` (or explicit `questionIds`). Supports `method` (`"sum" | "mean" | "percentage" | "thresholdCount"`), `thresholds` / `defaultThreshold` (for item-level cutoff screeners like ASRS-v1.1 Part A), `multiplier`, `min`, `max`, `unit`, and `severityBands`.
+- **`scoring.higherIsWorse`**: Set `false` for positive well-being, resilience, or diet-quality scales (like WHO-5, BRS, REAP-S, MEDAS) so trend deltas and chart colors reflect improvement accurately.
 - **`scoring.safetyFlags`** *(optional)*: Displays a compassionate crisis/support callout whenever a sensitive item meets or exceeds `minValue`.
 
 > **Disclaimer**: Self-assessment quizzes in HeyJournal are intended for personal tracking and reflection over time and are not a substitute for professional medical or psychological diagnosis.

@@ -1,0 +1,111 @@
+{
+  "id": "cbi",
+  "name": "CBI",
+  "fullName": "Copenhagen Burnout Inventory (Personal & Work)",
+  "category": "Anxiety & Stress",
+  "shortDescription": "13-item public-domain inventory measuring Personal Burnout and Work-Related Burnout on a 0–100% scale.",
+  "timeframe": "Think about your recent day-to-day energy and work experience:",
+  "estimatedMinutes": 3,
+  "resourceUrl": "https://pubmed.ncbi.nlm.nih.gov/16030306/",
+  "resourceLabel": "PubMed CBI Validation",
+  "citation": "Kristensen TS, Borritz M, Villadsen E, Christensen KB. Work & Stress. 2005;19(3):192-207.",
+  "answerScale": [
+    { "label": "Never / almost never", "value": 0 },
+    { "label": "Seldom", "value": 25 },
+    { "label": "Sometimes", "value": 50 },
+    { "label": "Often", "value": 75 },
+    { "label": "Always", "value": 100 }
+  ],
+  "questions": [
+    { "id": "q1", "subscale": "personal", "text": "How often do you feel tired?" },
+    { "id": "q2", "subscale": "personal", "text": "How often are you physically exhausted?" },
+    { "id": "q3", "subscale": "personal", "text": "How often are you emotionally exhausted?" },
+    { "id": "q4", "subscale": "personal", "text": "How often do you think: \"I can't take it anymore\"?" },
+    { "id": "q5", "subscale": "personal", "text": "How often do you feel worn out?" },
+    { "id": "q6", "subscale": "personal", "text": "How often do you feel weak and susceptible to illness?" },
+    {
+      "id": "q7",
+      "subscale": "work",
+      "text": "Is your work emotionally exhausting?",
+      "options": [
+        { "label": "To a very low degree", "value": 0 },
+        { "label": "To a low degree", "value": 25 },
+        { "label": "Somewhat", "value": 50 },
+        { "label": "To a high degree", "value": 75 },
+        { "label": "To a very high degree", "value": 100 }
+      ]
+    },
+    {
+      "id": "q8",
+      "subscale": "work",
+      "text": "Do you feel burnt out because of your work?",
+      "options": [
+        { "label": "To a very low degree", "value": 0 },
+        { "label": "To a low degree", "value": 25 },
+        { "label": "Somewhat", "value": 50 },
+        { "label": "To a high degree", "value": 75 },
+        { "label": "To a very high degree", "value": 100 }
+      ]
+    },
+    {
+      "id": "q9",
+      "subscale": "work",
+      "text": "Does your work frustrate you?",
+      "options": [
+        { "label": "To a very low degree", "value": 0 },
+        { "label": "To a low degree", "value": 25 },
+        { "label": "Somewhat", "value": 50 },
+        { "label": "To a high degree", "value": 75 },
+        { "label": "To a very high degree", "value": 100 }
+      ]
+    },
+    { "id": "q10", "subscale": "work", "text": "Do you feel worn out at the end of the working day?" },
+    { "id": "q11", "subscale": "work", "text": "Are you exhausted in the morning at the thought of another day at work?" },
+    { "id": "q12", "subscale": "work", "text": "Do you feel that every working hour is tiring for you?" },
+    { "id": "q13", "subscale": "work", "reverse": true, "text": "Do you have enough energy for family and friends during leisure time?" }
+  ],
+  "scoring": {
+    "method": "mean",
+    "min": 0,
+    "max": 100,
+    "unit": "%",
+    "higherIsWorse": true,
+    "formulaDescription": "Items are scored 0, 25, 50, 75, or 100 (Q13 reverse-scored) and averaged for Personal Burnout (Q1–Q6), Work-Related Burnout (Q7–Q13), and overall burnout (0–100%). Per Kristensen et al. (2005), burnout is a continuum; scores ≥50% are commonly used in occupational research to flag moderate or higher burnout.",
+    "severityBands": [
+      { "min": 0, "max": 49, "label": "Low Burnout", "level": "low" },
+      { "min": 50, "max": 74, "label": "Moderate Burnout", "level": "moderate" },
+      { "min": 75, "max": 89, "label": "High Burnout", "level": "high" },
+      { "min": 90, "max": 100, "label": "Very High Burnout", "level": "severe" }
+    ],
+    "subscales": [
+      {
+        "id": "personal",
+        "name": "Personal Burnout",
+        "method": "mean",
+        "min": 0,
+        "max": 100,
+        "unit": "%",
+        "severityBands": [
+          { "min": 0, "max": 49, "label": "Low", "level": "low" },
+          { "min": 50, "max": 74, "label": "Moderate", "level": "moderate" },
+          { "min": 75, "max": 89, "label": "High", "level": "high" },
+          { "min": 90, "max": 100, "label": "Very High", "level": "severe" }
+        ]
+      },
+      {
+        "id": "work",
+        "name": "Work-Related Burnout",
+        "method": "mean",
+        "min": 0,
+        "max": 100,
+        "unit": "%",
+        "severityBands": [
+          { "min": 0, "max": 49, "label": "Low", "level": "low" },
+          { "min": 50, "max": 74, "label": "Moderate", "level": "moderate" },
+          { "min": 75, "max": 89, "label": "High", "level": "high" },
+          { "min": 90, "max": 100, "label": "Very High", "level": "severe" }
+        ]
+      }
+    ]
+  }
+}

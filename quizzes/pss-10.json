@@ -8,7 +8,7 @@
   "estimatedMinutes": 2,
   "resourceUrl": "https://www.cmu.edu/dietrich/psychology/stress-immunity-disease-lab/scales/index.html",
   "resourceLabel": "CMU PSS-10 Reference",
-  "citation": "Cohen S, Kamarck T, Mermelstein R. J Health Soc Behav. 1983;24(4):385-396.",
+  "citation": "Cohen S, Williamson G. In: Spacapan S, Oskamp S, eds. The Social Psychology of Health. Sage; 1988:31-67 (adapted from Cohen S, Kamarck T, Mermelstein R. J Health Soc Behav. 1983;24(4):385-396).",
   "answerScale": [
     { "label": "Never", "value": 0 },
     { "label": "Almost never", "value": 1 },

@@ -2,7 +2,7 @@
   "id": "asrs-v1-1",
   "name": "ASRS-v1.1",
   "fullName": "Adult ADHD Self-Report Scale (v1.1)",
-  "category": "Trauma & Focus",
+  "category": "Focus & Executive Function",
   "shortDescription": "18-item WHO scale assessing adult inattention, executive functioning, and hyperactivity.",
   "timeframe": "Over the past 6 months, how often have you felt or conducted yourself in the following ways?",
   "estimatedMinutes": 4,
@@ -42,16 +42,28 @@
     "max": 72,
     "unit": "pts",
     "higherIsWorse": true,
-    "formulaDescription": "Sum of all 18 items scored 0–4 each (range 0–72), with Inattentive (0–36), Hyperactive-Impulsive (0–36), and Part A Screener (Q1–Q6, 0–24) subscales.",
+    "formulaDescription": "Total symptom load sums all 18 items scored 0–4 (range 0–72; total bands are descriptive for longitudinal tracking). Per Kessler et al. (2005), the validated Part A Screener counts item-specific WHO shaded-box thresholds (Q1–Q3 ≥ Sometimes [2]; Q4–Q6 ≥ Often [3]); ≥4 of 6 indicates a positive adult ADHD screen.",
     "severityBands": [
       { "min": 0, "max": 23, "label": "Low Symptom Load", "level": "low" },
-      { "min": 24, "max": 35, "label": "Mild / Borderline", "level": "mild" },
-      { "min": 36, "max": 47, "label": "Moderate", "level": "moderate" },
-      { "min": 48, "max": 59, "label": "High", "level": "high" },
-      { "min": 60, "max": 72, "label": "Very High", "level": "severe" }
+      { "min": 24, "max": 35, "label": "Mild Symptom Load", "level": "mild" },
+      { "min": 36, "max": 47, "label": "Moderate Symptom Load", "level": "moderate" },
+      { "min": 48, "max": 59, "label": "High Symptom Load", "level": "high" },
+      { "min": 60, "max": 72, "label": "Very High Symptom Load", "level": "severe" }
     ],
     "subscales": [
-      { "id": "part-a", "name": "Part A Screener (Q1–Q6)", "questionIds": ["q1", "q2", "q3", "q4", "q5", "q6"], "min": 0, "max": 24 },
+      {
+        "id": "part-a",
+        "name": "Part A Screener (WHO Cutoffs)",
+        "method": "thresholdCount",
+        "questionIds": ["q1", "q2", "q3", "q4", "q5", "q6"],
+        "thresholds": { "q1": 2, "q2": 2, "q3": 2, "q4": 3, "q5": 3, "q6": 3 },
+        "min": 0,
+        "max": 6,
+        "severityBands": [
+          { "min": 0, "max": 3, "label": "Negative Screen (<4/6)", "level": "low" },
+          { "min": 4, "max": 6, "label": "Positive Screen (≥4/6)", "level": "high" }
+        ]
+      },
       { "id": "inattentive", "name": "Inattentive", "min": 0, "max": 36 },
       { "id": "hyperactive", "name": "Hyperactive-Impulsive", "min": 0, "max": 36 }
     ]

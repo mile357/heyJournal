@@ -1,0 +1,43 @@
+{
+  "id": "stop-bang",
+  "name": "STOP-BANG",
+  "fullName": "STOP-BANG Obstructive Sleep Apnea Screener",
+  "category": "Sleep",
+  "shortDescription": "8-item clinical screener for obstructive sleep apnea risk — pairs directly with the Epworth Sleepiness Scale (ESS).",
+  "timeframe": "Answer Yes or No to each of the 8 STOP-BANG sleep apnea risk questions:",
+  "estimatedMinutes": 2,
+  "resourceUrl": "https://www.stopbang.ca/osa/screening.php",
+  "resourceLabel": "Official STOP-BANG Reference",
+  "citation": "Chung F, Yegneswaran B, Liao P, et al. Anesthesiology. 2008;108(5):812-821; Chung F, Abdullah HR, Liao P. Chest. 2016;149(3):631-638.",
+  "answerScale": [
+    { "label": "No", "value": 0 },
+    { "label": "Yes", "value": 1 }
+  ],
+  "questions": [
+    { "id": "q1", "subscale": "stop", "text": "Snoring: Do you snore loudly (loud enough to be heard through closed doors, or your bed partner elbows you for snoring at night)?" },
+    { "id": "q2", "subscale": "stop", "text": "Tired: Do you often feel tired, fatigued, or sleepy during the daytime (such as falling asleep during driving or talking to someone)?" },
+    { "id": "q3", "subscale": "stop", "text": "Observed: Has anyone observed you stop breathing or choking/gasping during your sleep?" },
+    { "id": "q4", "subscale": "stop", "text": "Pressure: Do you have or are you being treated for high blood pressure?" },
+    { "id": "q5", "subscale": "bang", "text": "BMI: Is your Body Mass Index (BMI) more than 35 kg/m²?" },
+    { "id": "q6", "subscale": "bang", "text": "Age: Are you older than 50 years old?" },
+    { "id": "q7", "subscale": "bang", "text": "Neck size: Is your neck circumference greater than 16 inches (40 cm)?" },
+    { "id": "q8", "subscale": "bang", "text": "Gender: Is your biological sex male?" }
+  ],
+  "scoring": {
+    "method": "sum",
+    "min": 0,
+    "max": 8,
+    "unit": "yes",
+    "higherIsWorse": true,
+    "formulaDescription": "Count of 'Yes' answers across all 8 items (range 0–8). Standard OSA risk tiers: 0–2 Low Risk, 3–4 Intermediate Risk, 5–8 High Risk. Per Chung et al. (2016), scoring ≥2 on the 4 STOP questions plus male sex, BMI >35, or neck >40 cm also elevates risk to High.",
+    "severityBands": [
+      { "min": 0, "max": 2, "label": "Low OSA Risk", "level": "low" },
+      { "min": 3, "max": 4, "label": "Intermediate OSA Risk", "level": "moderate" },
+      { "min": 5, "max": 8, "label": "High OSA Risk", "level": "severe" }
+    ],
+    "subscales": [
+      { "id": "stop", "name": "STOP Symptoms (Q1–Q4)", "min": 0, "max": 4 },
+      { "id": "bang", "name": "BANG Risk Factors (Q5–Q8)", "min": 0, "max": 4 }
+    ]
+  }
+}
